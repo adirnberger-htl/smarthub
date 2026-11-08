@@ -1,0 +1,267 @@
+Haus
+Hauptgruppe.Licht.0/0/1	Vorraum UG Decke schalten	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/2	Licht WC OG schalten	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/3	Stiege Decke schalten	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/4	Vorraum OG LEDunten schalten	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/5	Stiege LEDunten schalten	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/6	Vorraum UG LEDunten schalten	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/7	Vorrum OG Decke schalten	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/8	HWR Decke schalten	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/9	Stiege Steckdose schalten	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/10	Büro Decke HL schalten	EIS 1 'Switching' (1 Bit)	Low	0/0/39 0/0/95
+Hauptgruppe.Licht.0/0/11	WC EG Spiegel schalten	EIS 1 'Switching' (1 Bit)	Low	0/3/2
+Hauptgruppe.Licht.0/0/12	WC EG Decke schalten	EIS 1 'Switching' (1 Bit)	Low	0/3/2
+Hauptgruppe.Licht.0/0/13	Melder Vorraum Abzugserkennung	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/14	Melder Vorraum Bewegung	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/15	Melder Vorraum Meldung	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/17	Melder Windfang Abzugserkennung	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/18	Melder Windfang Bewegung	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/19	Melder Windfang Meldung	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/20	Melder Windfang Dämmerungssensor	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/21	Whz Decke schalten	EIS 1 'Switching' (1 Bit)	Low	0/3/4 0/0/63
+Hauptgruppe.Licht.0/0/22	Bad OG Ind. schalten	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/23	Bad OG Spiegel schalten	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/24	KZ links Decke schalten	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/25	Szene	Uncertain (1 Byte)	Low	
+Hauptgruppe.Licht.0/0/26	KZ links Steckdosen schalten	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/27	KZ mitte Decke schalten	EIS 1 'Switching' (1 Bit)	Low	0/0/38 0/0/54
+Hauptgruppe.Licht.0/0/28	KZ mitte Steckdosen schalten	EIS 1 'Switching' (1 Bit)	Low	0/0/14
+Hauptgruppe.Licht.0/0/29	KZ rechts Decke schalten	EIS 1 'Switching' (1 Bit)	Low	0/0/30 0/1/14 0/1/15 0/0/201 0/0/202 0/0/203 0/1/20 0/1/21
+Hauptgruppe.Licht.0/0/30	KZ rechts Steckdose schalten	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/31	SZ Bett links schalten	EIS 1 'Switching' (1 Bit)	Low	0/3/0
+Hauptgruppe.Licht.0/0/32	SZ Bett rechts schalten	EIS 1 'Switching' (1 Bit)	Low	0/3/0
+Hauptgruppe.Licht.0/0/33	SZ Decke schalten	EIS 1 'Switching' (1 Bit)	Low	0/3/0
+Hauptgruppe.Licht.0/0/34	AT/S4.16.1 Kanal A	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/35	Küche Decke schalten	EIS 1 'Switching' (1 Bit)	Low	0/3/4
+Hauptgruppe.Licht.0/0/36	Handtuchtrockner schalten	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/37	Steckd. Esszimmer schalten	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/38	Melder VorraumOG Bewegung	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/39	Melder VorraumOG Meldung	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/44	Enocean5	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/46	KZ mitte Steckdosen_Status	EIS 1 'Switching' (1 Bit)	Low	0/0/15
+Hauptgruppe.Licht.0/0/47	Licht_Kuecheninsel schalten	EIS 1 'Switching' (1 Bit)	Low	0/3/4
+Hauptgruppe.Licht.0/0/49	Garten LED Eingang schalten	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/50	Garten Pollerleuchte schalten	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/51	Garten Pollerleuchte Steckdose schalten	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/52	WC_EG_Dauerlicht	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/53	KZ links Steckdose Status	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/54	KZ mitte Decke Status	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/55	KZ recht Decke Status	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/56	KZ rechts Steckdose Status	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/57	SZ Bett links Status	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/58	SZ Bett rechts Status	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/59	SZ Decke Status	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/60	KZ links Decke Status	EIS 1 'Switching' (1 Bit)	Low	0/0/46 0/0/53 0/0/54 0/0/55 0/0/56 0/0/71 0/0/93 0/0/204 0/0/205 0/0/206
+Hauptgruppe.Licht.0/0/61	Bad OG Spiegel Status	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/62	Bad OG Ind. Dusche&WC Status	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/63	Whz Decke Status	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/64	Vorraum UG Decke Status	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/65	WC OG Status	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/66	Stiege Decke Status	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/67	Vorraum OG LED unten Status	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/68	Stiege LED unten Status	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/69	Vorraum UG LED unten Status	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/70	Vorraum OG Decke Status	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/71	HWR Decke Status	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/72	Küche Indirekt Status	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/74	WC EG Spiegel Status	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/75	WC EG Decke Status	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/76	Küche Decke Status	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/77	Handtuchtrockner Status	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/78	Steckdose Esszimmer Status	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/79	Garten Pollerleuchten Licht Status	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/80	Garten Pollerleuchten Steckdosen Status	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/81	Garten LED Eingang Status	EIS 1 'Switching' (1 Bit)	Low	0/0/49
+Hauptgruppe.Licht.0/0/82	Dachboden schalten	EIS 1 'Switching' (1 Bit)	Low	0/0/83
+Hauptgruppe.Licht.0/0/83	Dachboden Status	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/84	Außenlampen Abstellraum hinten schalten	EIS 1 'Switching' (1 Bit)	Low	0/0/85
+Hauptgruppe.Licht.0/0/85	Außenlampen Abstellraum hinten Status	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/86	Außenlampen Westseite schalten	EIS 1 'Switching' (1 Bit)	Low	0/0/87
+Hauptgruppe.Licht.0/0/87	Außenlampen Westseite Status	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/88	Außenlampe Südseite schalten	EIS 1 'Switching' (1 Bit)	Low	0/0/89
+Hauptgruppe.Licht.0/0/89	Außenlampe Südseite Status	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/90	Außenlampe Ost+Nordseite schalten	EIS 1 'Switching' (1 Bit)	Low	0/0/91
+Hauptgruppe.Licht.0/0/91	Außenlampe Ost+Nordseite Status	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/92	KZ mitte Licht unter Bett schalten	EIS 1 'Switching' (1 Bit)	Low	0/0/93
+Hauptgruppe.Licht.0/0/93	KZ mitte Licht unter Bett Status	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/94	Büro Karin schalten	EIS 1 'Switching' (1 Bit)	Low	0/0/57 0/0/58 0/0/59
+Hauptgruppe.Licht.0/0/95	KZ Arthur Schreibtischlicht schalten	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/96	KZ Arthur Schreibtischlicht Abs Dimmen	Uncertain (1 Byte)	Low	
+Hauptgruppe.Licht.0/0/110	Büro Decke HL Wert	Uncertain (1 Byte)	Low	0/0/96
+Hauptgruppe.Licht.0/0/150	VorraumOG_HAND	EIS 1 'Switching' (1 Bit)	Low	0/0/151 0/0/152
+Hauptgruppe.Licht.0/0/151	VorraumEG_HAND	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/152	Stiege_HAND	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/153	Vorraum OG LED Decke Wert	Uncertain (1 Byte)	Low	0/0/154 0/0/155
+Hauptgruppe.Licht.0/0/154	Vorraum EG LED Decke Wert	Uncertain (1 Byte)	Low	
+Hauptgruppe.Licht.0/0/155	Stiege LED Decke Wert	Uncertain (1 Byte)	Low	
+Hauptgruppe.Licht.0/0/195	Büro Karin Wert	Uncertain (1 Byte)	Low	
+Hauptgruppe.Licht.0/0/201	Kinderzimmer ost schalten	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/202	Kinderzimmer sued schalten	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/203	Kinderzimmer west schalten	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/204	Kinderzimmer ost status	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/205	Kinderzimmer sued status	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Licht.0/0/206	Kinderzimmer west status	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Beschattung.0/1/0	Jal HWR fahren	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Beschattung.0/1/1	Jal HWR verstellen	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Beschattung.0/1/2	Jal Küche fahren	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Beschattung.0/1/3	Jal Küche verstellen	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Beschattung.0/1/4	Jal Büro fahren	EIS 1 'Switching' (1 Bit)	Low	0/1/12 0/1/13 0/1/5
+Hauptgruppe.Beschattung.0/1/5	Jalo Büro verstellen	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Beschattung.0/1/6	Jal KZ links,ost fahren	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Beschattung.0/1/7	Jal KZ links,ost verstellen	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Beschattung.0/1/8	Jal KZ links,süd fahren	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Beschattung.0/1/9	Jal KZ links,süd verstellen	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Beschattung.0/1/10	Jal KZ mitte,süd fahren	EIS 1 'Switching' (1 Bit)	Low	0/1/11
+Hauptgruppe.Beschattung.0/1/11	Jal KZ mitte,verstellen	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Beschattung.0/1/12	Jal Schlafzimmer fahren	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Beschattung.0/1/13	Jal Schlafzimmer verstellen	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Beschattung.0/1/14	Jal KZ rechts,west fahren	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Beschattung.0/1/15	Jal KZ rechts,west verstellen	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Beschattung.0/1/16	Jal WC OG fahren	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Beschattung.0/1/17	Jal WC OG verstellen	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Beschattung.0/1/18	Jal Bad OG fahren	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Beschattung.0/1/19	Jal Bad OG verstellen	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Beschattung.0/1/20	Jal KZ rechts,süd verstellen	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Beschattung.0/1/21	Jal KZ rechts,süd fahren	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Beschattung.0/1/27	Jal KZ links fahren	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Beschattung.0/1/28	Jal KZ rechts fahren	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Beschattung.0/1/35	Jal KZ links verstellen	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Beschattung.0/1/36	Jal KZ rechts verstellen	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Beschattung.0/1/37	Jal WC EG fahren	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Beschattung.0/1/38	Jal WC EG Stop	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Beschattung.0/1/64	Jal KZ rechts,süd Höhenpos. Status	Uncertain (2 Byte)	Low	
+Hauptgruppe.Beschattung.0/1/65	Jal KZ rechts,süd Lamellenpos. Status	Uncertain (2 Byte)	Low	
+Hauptgruppe.Beschattung.0/1/70	Jal KZ rechts,west Höhenpos. Status	Uncertain (2 Byte)	Low	
+Hauptgruppe.Beschattung.0/1/71	Jal KZ rechts,west Lamellenpos. Status	Uncertain (2 Byte)	Low	
+Hauptgruppe.Beschattung.0/1/100	Auto_Fassade1	EIS 1 'Switching' (1 Bit)	Low	0/1/104
+Hauptgruppe.Beschattung.0/1/101	Auto_Fassade2	EIS 1 'Switching' (1 Bit)	Low	0/1/105
+Hauptgruppe.Beschattung.0/1/102	Auto_Fassade3	EIS 1 'Switching' (1 Bit)	Low	0/1/106
+Hauptgruppe.Beschattung.0/1/103	Auto_Fassade4	EIS 1 'Switching' (1 Bit)	Low	0/1/107
+Hauptgruppe.Beschattung.0/1/104	Status_Auto_Fassade1	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Beschattung.0/1/105	Status_Auto_Fassade2	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Beschattung.0/1/106	Status_Auto_Fassade3	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Beschattung.0/1/107	Status_Auto_Fassade4	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Strom.0/2/0	Waschmaschine L1 mA	Uncertain (2 Byte)	Low	
+Hauptgruppe.Strom.0/2/1	Kühlschrank L3 mA	Uncertain (2 Byte)	Low	
+Hauptgruppe.Strom.0/2/2	Kindezimmer Theo L2 mA	Uncertain (2 Byte)	Low	
+Hauptgruppe.Strom.0/2/3	Kinderzimmer Luise L2 mA	Uncertain (2 Byte)	Low	
+Hauptgruppe.Strom.0/2/4	Kinderzimmer Arthur L2 mA	Uncertain (2 Byte)	Low	
+Hauptgruppe.Strom.0/2/8	SA/S2.16.5S Kanal A	Uncertain (2 Byte)	Low	
+Hauptgruppe.Strom.0/2/9	SA/S2.16.5S Kanal B	Uncertain (2 Byte)	Low	
+Hauptgruppe.Strom.0/2/20	Wallbox Wirkenergie	Uncertain (4 Byte)	Low	
+Hauptgruppe.Strom.0/2/21	Wallbox Momentane Leistung	Uncertain (2 Byte)	Low	
+Hauptgruppe.Strom.0/2/22	Wallbox Fehlermeldung	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Strom.0/2/23	Wallbox Statusbyte	Uncertain (1 Byte)	Low	
+Hauptgruppe.Strom.0/2/50	GM Spannung L1	Uncertain (2 Byte)	Low	
+Hauptgruppe.Strom.0/2/51	GM Spannung L2	Uncertain (2 Byte)	Low	
+Hauptgruppe.Strom.0/2/52	GM Spannung L3	Uncertain (2 Byte)	Low	
+Hauptgruppe.Strom.0/2/53	GM Strom L1	Uncertain (2 Byte)	Low	
+Hauptgruppe.Strom.0/2/54	GM Strom L2	Uncertain (2 Byte)	Low	
+Hauptgruppe.Strom.0/2/55	GM Strom L3	Uncertain (2 Byte)	Low	
+Hauptgruppe.Strom.0/2/56	GM Wirkarbeit L1	Uncertain (4 Byte)	Low	
+Hauptgruppe.Strom.0/2/57	GM Wirkarbeit L2	Uncertain (4 Byte)	Low	
+Hauptgruppe.Strom.0/2/58	GM Wirkarbeit L3	Uncertain (4 Byte)	Low	
+Hauptgruppe.Strom.0/2/59	GM Wirkarbeit Summe	Uncertain (4 Byte)	Low	
+Hauptgruppe.Strom.0/2/60	GM Frequenz	Uncertain (2 Byte)	Low	
+Hauptgruppe.Strom.0/2/61	GM Leistungsfaktor 1	Uncertain (2 Byte)	Low	
+Hauptgruppe.Strom.0/2/62	GM Leistungsfaktor 2	Uncertain (2 Byte)	Low	
+Hauptgruppe.Strom.0/2/63	GM Leistungsfaktor 3	Uncertain (2 Byte)	Low	
+Hauptgruppe.Strom.0/2/64	GM Tages Wirkarbeit	Uncertain (2 Byte)	Low	
+Hauptgruppe.Strom.0/2/65	GM Monats Wirkarbeit	Uncertain (4 Byte)	Low	
+Hauptgruppe.Strom.0/2/66	GM Jahres Wirkarbeit	Uncertain (4 Byte)	Low	
+Hauptgruppe.Strom.0/2/67	GM Wirkarbeit Montag	Uncertain (2 Byte)	Low	
+Hauptgruppe.Strom.0/2/68	GM Wirkarbeit Dienstag	Uncertain (2 Byte)	Low	
+Hauptgruppe.Strom.0/2/69	GM Wirkarbeit Mittwoch	Uncertain (2 Byte)	Low	
+Hauptgruppe.Strom.0/2/70	GM Wirkarbeit Donnerstag	Uncertain (2 Byte)	Low	
+Hauptgruppe.Strom.0/2/71	GM Wirkarbeit Freitag	Uncertain (2 Byte)	Low	
+Hauptgruppe.Strom.0/2/72	GM Wirkarbeit Samstag	Uncertain (2 Byte)	Low	
+Hauptgruppe.Strom.0/2/73	GM Wirkarbeit Sonntag	Uncertain (2 Byte)	Low	
+Hauptgruppe.Strom.0/2/74	GM Wirkarbeit Januar	Uncertain (4 Byte)	Low	
+Hauptgruppe.Strom.0/2/75	GM Wirkarbeit Februar	Uncertain (4 Byte)	Low	
+Hauptgruppe.Strom.0/2/76	GM Wirkarbeit März	Uncertain (4 Byte)	Low	
+Hauptgruppe.Strom.0/2/77	GM Wirkarbeit April	Uncertain (4 Byte)	Low	
+Hauptgruppe.Strom.0/2/78	GM Wirkarbeit Mai	Uncertain (4 Byte)	Low	
+Hauptgruppe.Strom.0/2/79	GM Wirkarbeit Juni	Uncertain (4 Byte)	Low	
+Hauptgruppe.Strom.0/2/80	GM Wirkarbeit Juli	Uncertain (4 Byte)	Low	
+Hauptgruppe.Strom.0/2/81	GM Wirkarbeit August	Uncertain (4 Byte)	Low	
+Hauptgruppe.Strom.0/2/82	GM Wirkarbeit September	Uncertain (4 Byte)	Low	
+Hauptgruppe.Strom.0/2/83	GM Wirkarbeit Oktober	Uncertain (4 Byte)	Low	
+Hauptgruppe.Strom.0/2/84	GM Wirkarbeit November	Uncertain (4 Byte)	Low	
+Hauptgruppe.Strom.0/2/85	GM Wirkarbeit Dezember	Uncertain (4 Byte)	Low	
+Hauptgruppe.Strom.0/2/86	GM Wirkleistung Summe	Uncertain (4 Byte)	Low	
+Hauptgruppe.Zentral.0/3/0	SZ zentral schalten	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Zentral.0/3/1	Betriebsartenumschaltung	Uncertain (1 Byte)	Low	
+Hauptgruppe.Zentral.0/3/2	Licht_WC_EG_Zentral	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Zentral.0/3/3	Licht_Bad_zentral	EIS 1 'Switching' (1 Bit)	Low	0/0/23 0/0/22 0/0/2
+Hauptgruppe.Zentral.0/3/4	WohnEssküche	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Zentral.0/3/5	Haustür	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Zentral.0/3/6	Küchentür	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Zentral.0/3/7	Esszimmertür	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Zentral.0/3/8	Fenster Büro	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Zentral.0/3/9	Fenster Wohnzimmer	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Zentral.0/3/10	Fenster WC EG	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Zentral.0/3/11	Fenster Technikraum	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Zentral.0/3/12	Fenster Schlafzimmer	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Zentral.0/3/13	Fenster1 KZ OST	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Zentral.0/3/14	Fenster2 KZ OST	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Zentral.0/3/15	Fenster3 KZ OST	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Zentral.0/3/16	Fenster1 KZ SÜD	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Zentral.0/3/17	Fenster2 KZ SÜD	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Zentral.0/3/18	Fenster1 KZ WEST	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Zentral.0/3/19	Fenster2 KZ WEST	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Zentral.0/3/20	Fenster3 KZ WEST	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Zentral.0/3/21	Fenster WC OG	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Zentral.0/3/22	Fenster BAD OG	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Zentral.0/3/23	SommerNachtKühlung	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Raumklima.0/4/0	KZ links Isttemperatur	Uncertain (2 Byte)	Low	0/4/4 0/4/8 0/4/12 0/4/16
+Hauptgruppe.Raumklima.0/4/1	KZ links Stellgröße Heizen	Uncertain (1 Byte)	Low	
+Hauptgruppe.Raumklima.0/4/2	KZ links Basissollwert	Uncertain (2 Byte)	Low	
+Hauptgruppe.Raumklima.0/4/3	KZ links Soll-Temperatur	Uncertain (2 Byte)	Low	
+Hauptgruppe.Raumklima.0/4/4	KZ mitte Isttemperatur	Uncertain (2 Byte)	Low	
+Hauptgruppe.Raumklima.0/4/7	KZ mitte Soll-Temperatur	Uncertain (2 Byte)	Low	
+Hauptgruppe.Raumklima.0/4/8	KZ rechts Isttemperatur	Uncertain (2 Byte)	Low	
+Hauptgruppe.Raumklima.0/4/12	BAD Isttemperatur	Uncertain (2 Byte)	Low	
+Hauptgruppe.Raumklima.0/4/16	WC Isttemperatur	Uncertain (2 Byte)	Low	
+Hauptgruppe.Raumklima.0/4/17	WC Stellgröße Heizen	Uncertain (1 Byte)	Low	
+Hauptgruppe.Raumklima.0/4/18	WC Sollwertverschiebung	Uncertain (2 Byte)	Low	
+Hauptgruppe.Raumklima.0/4/19	WC Soll-Temperatur	Uncertain (2 Byte)	Low	
+Hauptgruppe.Raumklima.0/4/20	WRL_Luefterstufe Status	Uncertain (1 Byte)	Low	
+Hauptgruppe.Raumklima.0/4/21	WRL_AUTO	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Raumklima.0/4/22	WRL_FanSpeed	Uncertain (1 Byte)	Low	
+Hauptgruppe.Raumklima.0/4/23	WRL_SollTemp	Uncertain (2 Byte)	Low	
+Hauptgruppe.Allgemein.0/5/0	Datum/Uhrzeit anfordern	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Allgemein.0/5/1	Datum	Uncertain (3 Byte)	Low	
+Hauptgruppe.Allgemein.0/5/2	Uhrzeit	Uncertain (3 Byte)	Low	
+Hauptgruppe.Allgemein.0/5/3	Helligkeit	Uncertain (2 Byte)	Low	
+Hauptgruppe.Allgemein.0/5/4	HelligkeitNord_Lux	Uncertain (4 Byte)	Low	
+Hauptgruppe.Allgemein.0/5/5	HelligkeitOst_Lux	Uncertain (4 Byte)	Low	
+Hauptgruppe.Allgemein.0/5/6	Niederschlag	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Allgemein.0/5/7	Außentemperatur	Uncertain (2 Byte)	Low	
+Hauptgruppe.Allgemein.0/5/8	Elevation	Uncertain (1 Byte)	Low	
+Hauptgruppe.Allgemein.0/5/9	Windgeschwindigkeit	Uncertain (2 Byte)	Low	
+Hauptgruppe.Allgemein.0/5/10	Windalarm	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Allgemein.0/5/11	Windsensorstörung	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Allgemein.0/5/12	Azimuth	Uncertain (1 Byte)	Low	
+Hauptgruppe.Allgemein.0/5/13	HelligkeitSued_Lux	Uncertain (4 Byte)	Low	
+Hauptgruppe.Allgemein.0/5/14	HelligkeitWest_Lux	Uncertain (4 Byte)	Low	
+Hauptgruppe.Allgemein.0/5/15	Lux Ost	Uncertain (2 Byte)	Low	
+Hauptgruppe.Allgemein.0/5/16	Lux Süd	Uncertain (2 Byte)	Low	
+Hauptgruppe.Allgemein.0/5/17	Lux West	Uncertain (2 Byte)	Low	
+Hauptgruppe.Allgemein.0/5/18	Pooltemperatur	Uncertain (2 Byte)	Low	
+Hauptgruppe.Allgemein.0/5/19	HelligkeitMax_Lux	Uncertain (4 Byte)	Low	
+Hauptgruppe.Allgemein.0/5/20	Niederschlagsintensität	Uncertain (4 Byte)	Low	
+Hauptgruppe.Allgemein.0/5/21	Niederschlagsmenge	Uncertain (4 Byte)	Low	
+Hauptgruppe.Allgemein.0/5/22	NiederschlagAbsolut	Uncertain (4 Byte)	Low	
+Hauptgruppe.Allgemein.0/5/23	Niederschlagsart	Uncertain (2 Byte)	Low	
+Hauptgruppe.Allgemein.0/5/24	Windrichtung	Uncertain (2 Byte)	Low	
+Hauptgruppe.Allgemein.0/5/25	RelativeLuftfeuchtigkeit	Uncertain (1 Byte)	Low	
+Hauptgruppe.Allgemein.0/5/26	Globalstrahlung	Uncertain (2 Byte)	Low	
+Hauptgruppe.Medientechnik.0/6/0	Radio_BAD_schalten	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Medientechnik.0/6/1	Radio_BAD_Volm	EIS 2 'Dimming - control' (4 Bit)	Low	
+Hauptgruppe.Medientechnik.0/6/2	Radio_BAD_Chanel	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Medientechnik.0/6/3	Radio_WC_schalten	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Medientechnik.0/6/4	Radio_WC_Volm	EIS 2 'Dimming - control' (4 Bit)	Low	
+Hauptgruppe.Medientechnik.0/6/5	Radio_WC_Chanel	EIS 1 'Switching' (1 Bit)	Low	
+Hauptgruppe.Medientechnik.0/6/6	Radio_BAD_VolmPerc	Uncertain (1 Byte)	Low	
+Hauptgruppe.Medientechnik.0/6/7	Radio_WC_VolmPerc	Uncertain (1 Byte)	Low	
+Hauptgruppe.Medientechnik.0/6/8	Radio_Netzteil_schalten	EIS 1 'Switching' (1 Bit)	Low	

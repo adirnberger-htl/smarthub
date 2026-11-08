@@ -1196,4 +1196,22 @@ New test cases added to `test.http` were returning "Not Found" (404) when testin
 2. **Document service coverage** - some stops/areas only have night bus service
 3. **Test cases should use verified coordinates** from stops that have actual scheduled service
 
----
+--------------------------------------------------------
+
+# Prompts (with open-spec)
+
+----
+
+/openspec-explore
+
+# System expansion - KNX
+
+## Overview
+
+I want to to add a KNX interface to my smarthub project. I want to be able to control my lights and window blinds via KNX (since there is already an existing system - an up to date version is at ~/docs/home-knx.esf).
+
+1.2.6 - my physical adress for KNX
+
+## Your Task
+
+Research the most efficient way to create this interface in my backend server and give me a detailed plan of how everything will work.
