@@ -11,6 +11,38 @@ export interface AutocompleteResult {
   description: string
   place_id: string
 }
+
+export type DeviceCategory = 'light' | 'outlet' | 'blind'
+export type DeviceCapability = 'switch' | 'brightness' | 'rgb' | 'blind_move' | 'blind_angle'
+export type BlindAction = 'up' | 'down' | 'stop' | 'stepUp' | 'stepDown'
+
+export interface SmartDeviceState {
+  on?: boolean
+  brightness?: number
+  rgb?: string
+  lastAction?: BlindAction | null
+  heightPos?: number
+  slatAngle?: number
+  updatedAt: string | null
+}
+
+export interface SmartDeviceDTO {
+  id: string
+  name: string
+  room: string
+  category: DeviceCategory
+  capabilities: DeviceCapability[]
+  state: SmartDeviceState
+}
+
+export interface DeviceCommandDTO {
+  on?: boolean
+  brightness?: number
+  rgb?: string
+  blindAction?: BlindAction
+  slatAngle?: number
+}
+
 interface ServiceStatusResponse {
   status: 'ok' | 'error'
   backend: string
@@ -146,6 +178,18 @@ export function useSmarthubApi() {
     return request<any>('DELETE', `/api/routines/${id}`, {})
   }
 
+  const fetchDevices = async (): Promise<{ devices: SmartDeviceDTO[] }> => {
+    return request<{ devices: SmartDeviceDTO[] }>('GET', '/api/devices', {})
+  }
+
+  const sendDeviceCommand = async (id: string, cmd: DeviceCommandDTO): Promise<SmartDeviceDTO> => {
+    return request<SmartDeviceDTO>('POST', `/api/devices/${id}`, { body: cmd })
+  }
+
+  const getDevicesEventsUrl = (): string => {
+    return buildUrl('/api/devices/events')
+  }
+
   return {
     get,
     post,
@@ -165,5 +209,8 @@ export function useSmarthubApi() {
     createRoutine,
     updateRoutine,
     deleteRoutine,
+    fetchDevices,
+    sendDeviceCommand,
+    getDevicesEventsUrl,
   }
 }

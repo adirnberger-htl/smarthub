@@ -4,6 +4,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useRuntimeConfig } from '#app'
 import { useSettings } from '../composables/use-settings.js'
 import { useSmarthubApi } from '../composables/use-smarthub-api.js'
+import { useDeviceOsd, OSD_ACTION_METADATA, type OsdHardwareAction } from '../composables/use-device-osd'
 import DatePickerPopup from '../components/date-picker-popup.vue'
 import AddressAutocomplete from '../components/address-autocomplete.vue'
 
@@ -16,6 +17,15 @@ const route = useRoute()
 
 const { state, getGlobalSettings, addRoutineItem, updateRoutineItem, removeRoutineItem, setPreview, saveGlobalSettings } = useSettings()
 const { geocodePlace, get, fetchMe, logout } = useSmarthubApi()
+const { state: osdState, startLearningKey, cancelLearningKey, resetKeymapToDefaults, triggerAction: triggerOsdAction } = useDeviceOsd()
+
+function toggleLearnAction(action: OsdHardwareAction) {
+  if (osdState.value.learningAction === action) {
+    cancelLearningKey()
+  } else {
+    startLearningKey(action)
+  }
+}
 
 const globalSettings = computed(() => getGlobalSettings())
 
@@ -461,6 +471,73 @@ onMounted(async () => {
       </section>
 
 
+
+      <section class="routines-section">
+        <div class="routines-section-header">
+          <h3><i class="fa-solid fa-keyboard" style="color: var(--color-primary); margin-right: 8px;"></i>Hardware Keypad &amp; Knob Mapping</h3>
+          <button type="button" class="add-routine-btn-premium" @click="resetKeymapToDefaults">
+            Reset Defaults
+          </button>
+        </div>
+
+        <div class="routine-card">
+          <div class="routine-card__body" style="padding: 16px 20px; display: flex; flex-direction: column; gap: 12px;">
+            <p class="helper-text" style="margin: 0 0 4px 0;">
+              Click a key badge below, then press a button or turn the rotary knob on your USB keypad to bind that hardware event. Press <b>Esc</b> to cancel.
+            </p>
+
+            <div
+              v-for="(meta, idx) in OSD_ACTION_METADATA"
+              :key="meta.action"
+              class="routine-card__row"
+              :style="{
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                paddingTop: idx > 0 ? '12px' : '0',
+                borderTop: idx > 0 ? '1px solid var(--border-light)' : 'none',
+              }"
+            >
+              <div class="routine-card__field" style="flex: 1; padding-right: 12px;">
+                <label class="field-label" style="font-size: 0.92rem; color: var(--text-primary-strong); margin: 0; text-transform: none; letter-spacing: normal; display: flex; align-items: center; gap: 8px;">
+                  <i :class="meta.icon" style="color: var(--color-primary); width: 16px; text-align: center;"></i>
+                  {{ meta.label }}
+                </label>
+                <p class="helper-text" style="margin: 2px 0 0 24px;">{{ meta.description }}</p>
+              </div>
+
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <button
+                  type="button"
+                  class="segment-btn"
+                  style="padding: 6px 10px; font-size: 0.8rem;"
+                  title="Test this OSD action"
+                  @click="triggerOsdAction(meta.action)"
+                >
+                  Test
+                </button>
+                <button
+                  type="button"
+                  class="add-routine-btn-premium"
+                  :style="{
+                    minWidth: '140px',
+                    textAlign: 'center',
+                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                    background: osdState.learningAction === meta.action ? 'var(--color-primary)' : 'var(--border-strong)',
+                    color: osdState.learningAction === meta.action ? '#ffffff' : 'var(--text-primary-strong)',
+                  }"
+                  @click="toggleLearnAction(meta.action)"
+                >
+                  {{
+                    osdState.learningAction === meta.action
+                      ? 'Press key / knob...'
+                      : osdState.keymap[meta.action]
+                  }}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
 
       <section class="routines-section">
         <div class="routines-section-header">

@@ -12,8 +12,10 @@ import { closeDb, getDb } from './db/sqlite.js';
 import authRouter from './routers/auth.js';
 import routinesRouter from './routers/routines.js';
 import settingsRouter from './routers/settings.js';
+import devicesRouter from './routers/devices.js';
 import { globalCSARouter } from './repo/csa-router.js';
 import { getNeo4jDriver } from './repo/neo4j-driver.js';
+import { globalKnxService } from './services/knx-service.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -54,15 +56,20 @@ getDb();
 // Load the graph for CSA routing in the background
 globalCSARouter.loadGraph(getNeo4jDriver()).catch(console.error);
 
+// Start KNX Multicast service
+globalKnxService.start();
+
 app.use(busRouter);
 app.use(weatherRouter);
 app.use(placesRouter);
 app.use(authRouter);
 app.use(routinesRouter);
 app.use(settingsRouter);
+app.use(devicesRouter);
 
 process.on('SIGINT', async () => {
     console.log('Shutting down...');
+    await globalKnxService.stop();
     await closeNeo4j();
     closeDb();
     process.exit(0);

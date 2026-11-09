@@ -60,9 +60,10 @@ services:
     build:
       context: ./_backend
       target: prod
+    network_mode: host
     env_file: .env
     environment:
-      NEO4J_HOST: neo4j
+      NEO4J_HOST: localhost
       NEO4J_PROTOCOL: bolt
       NEO4J_BOLT_PORT: 7687
       DB_PATH: /data/smarthub.sqlite
@@ -73,8 +74,6 @@ services:
         condition: service_healthy
     volumes:
       - smarthub_data:/data
-    ports:
-      - "${BACKEND_PORT:-3000}:3000"
     restart: unless-stopped
 
   frontend:

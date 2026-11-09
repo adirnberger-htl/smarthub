@@ -213,3 +213,82 @@ Accept: application/json
 ### Non-existent Place
 GET http://localhost:3000/api/places/geocode?place=ThisPlaceDoesNotExist12345
 Accept: application/json
+
+### ============================================
+### UNIFIED SMART DEVICES API TESTS (Requires Auth Cookie)
+### ============================================
+
+### List all KZ West smart devices & live cached state
+GET http://localhost:3000/api/devices
+Accept: application/json
+
+### Switch KZ West Ceiling Light ON (0/0/29)
+POST http://localhost:3000/api/devices/ceiling-light
+Content-Type: application/json
+
+{
+  "on": true
+}
+
+### Dim Arthur Desk Light to 75% (0/0/96 + 0/0/95)
+POST http://localhost:3000/api/devices/desk-light
+Content-Type: application/json
+
+{
+  "brightness": 75
+}
+
+### Set KZ West Room LEDs RGB & Brightness
+POST http://localhost:3000/api/devices/room-leds
+Content-Type: application/json
+
+{
+  "rgb": "#00ff66",
+  "brightness": 80
+}
+
+### Switch KZ West Outlet OFF (0/0/30)
+POST http://localhost:3000/api/devices/outlet
+Content-Type: application/json
+
+{
+  "on": false
+}
+
+### Move West Window Blind DOWN (0/1/14)
+POST http://localhost:3000/api/devices/blind-west
+Content-Type: application/json
+
+{
+  "blindAction": "down"
+}
+
+### Stop West Window Blind (0/1/15)
+POST http://localhost:3000/api/devices/blind-west
+Content-Type: application/json
+
+{
+  "blindAction": "stop"
+}
+
+### Move All KZ West Blinds UP (0/1/28)
+POST http://localhost:3000/api/devices/blinds-all
+Content-Type: application/json
+
+{
+  "blindAction": "up"
+}
+
+### Adjust All KZ West Blind Slat Angles to 60% (0/1/36 step pulse)
+POST http://localhost:3000/api/devices/blinds-all
+Content-Type: application/json
+
+{
+  "slatAngle": 60
+}
+
+### Subscribe to Real-Time Smart Device State SSE Stream
+GET http://localhost:3000/api/devices/events
+Accept: text/event-stream
+
+

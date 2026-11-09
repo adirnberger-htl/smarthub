@@ -1215,3 +1215,141 @@ I want to to add a KNX interface to my smarthub project. I want to be able to co
 ## Your Task
 
 Research the most efficient way to create this interface in my backend server and give me a detailed plan of how everything will work.
+
+---
+
+### 1. Discovery: Codebase & home-knx.esf
+  
+  Found up-to-date ESF inside repo at home-knx.esf (267 lines, newer than                
+  home-knx-v1.txt).                                                                      
+                                                                                         
+  What home-knx.esf contains for Lights & Blinds:
+  
+  • Lights (Hauptgruppe.Licht.0/0/* & Zentral.0/3/*):
+      • Switch (DPT 1.001, 1-Bit): e.g. 0/0/29 (KZ rechts Decke schalten), 0/0/95 (KZ    
+      Arthur Schreibtischlicht schalten), 0/0/201..203 (Kinderzimmer ost/sued/west       
+      schalten).
+      • Status feedback (DPT 1.001, 1-Bit): e.g. 0/0/55 (KZ recht Decke Status), 0/0/204.
+      .206 (Kinderzimmer ost/sued/west status).
+      • Absolute Dimming (DPT 5.001, 1-Byte 0..100%): e.g. 0/0/96 (KZ Arthur
+      Schreibtischlicht Abs Dimmen), 0/0/110 (Büro Decke HL Wert), 0/0/153..155          
+      (Vorraum/Stiege LED Wert), 0/0/195 (Büro Karin Wert).
+  • Window Blinds (Hauptgruppe.Beschattung.0/1/*):
+      • Long Move Up/Down (fahren, DPT 1.008, 1-Bit): 0 = Up, 1 = Down. e.g. 0/1/14 (Jal 
+      KZ rechts,west fahren), 0/1/21 (Jal KZ rechts,süd fahren), 0/1/28 (Jal KZ rechts   
+      fahren).
+      • Step / Stop (verstellen / Stop, DPT 1.007 / 1.010, 1-Bit): triggers slat step or 
+      stops moving blind. e.g. 0/1/15, 0/1/20, 0/1/36, 0/1/38.
+      • Position Status (2-Byte 0/1/64, 65, 70, 71): height & slat position feedback on  
+      KZ rechts,süd and KZ rechts,west.
+  
+  ──────
+  ### 2. Most Efficient Backend Approach
+  
+  Backend in package.json is Node 20 + Express + TypeScript (tsx) + SQLite (sqlite.ts),  
+  running in Docker (docker-compose.yaml:58-78).                                         
+  
+  #### Library & Transport Comparison
+  
+   Option               │ Stack                │ Verdict          │ Why
+  ──────────────────────┼──────────────────────┼──────────────────┼──────────────────────
+   knxultimate          │ Pure TS/JS KNXnet/IP │ Best fit         │ Active maintenance,
+   (Recommended)        │ client               │                  │ native TypeScript
+			│                      │                  │ types, supports
+			│                      │                  │ physAddr: "1.2.6",
+			│                      │                  │ auto-reconnect, DPT
+			│                      │                  │ 1.001/1.007/1.008/5.
+			│                      │                  │ 001/9.001 encoding,
+			│                      │                  │ no C++ build deps in
+			│                      │                  │ Alpine Docker.
+   knx (npm)            │ Legacy JS client     │ Avoid            │ Unmaintained (~6
+			│                      │                  │ yrs), state-machine
+			│                      │                  │ lockups on UDP
+			│                      │                  │ packet loss, breaks
+			│                      │                  │ on modern Node
+			│                      │                  │ buffers.
+   knxd C++ daemon      │ OS daemon + socket   │ Only if USB/UART │ Needed only if
+			│                      │                  │ Raspberry Pi
+			│                      │                  │ connects to bus via
+			│                      │                  │ physical USB/TPUART
+			│                      │                  │ adapter instead of
+			│                      │                  │ LAN KNX IP
+			│                      │                  │ Gateway/Router.
+  
+  #### Docker + KNXnet/IP Networking Trap
+  
+  KNXnet/IP uses UDP port 3671. Standard KNX Tunneling sends replies back to the client  
+  IP/port reported in the payload. Inside Docker bridge network
+  (docker-compose.yaml:58-78), container IP (172.x.x.x) is unreachable by a LAN KNX IP   
+  Interface unless:                                                                      
+  
+  1. Unicast Tunneling with NAT mode enabled in knxultimate (hostProtocol: 'TunnelUDP',  
+  automatic NAT when container IP differs from LAN IP) — works directly inside existing  
+  Docker bridge without breaking neo4j hostname resolution.
+  2. Or network_mode: host if using Multicast Routing (224.0.23.12:3671).
+  ──────
+  ### 3. System Architecture & Data Flow Plan
+  
+    +-------------------------------------------------------------------------+          
+    |                        FRONTEND (Nuxt / Vue 3)                          |          
+    |  [Light Toggle / Dim Slider]   [Blind Up / Stop / Down]   [Room View]   |          
+    +------------------+----------------------------------+-------------------+          
+                       | REST Commands                    ^ SSE Live State
+                       | (POST /api/knx/...)              | (GET /api/knx/events)        
+                       v                                  |
+    +------------------+----------------------------------+-------------------+          
+    |                     EXPRESS BACKEND (_backend/src)                      |          
+    |                                                                         |          
+    |  +-----------------------+          +--------------------------------+  |          
+    |  |   routers/knx.ts      | -------> |      services/knx-service.ts   |  |          
+    |  |   (requireAuth)       |          |  - Singleton KNXUltimate conn  |  |          
+    |  +-----------------------+          |  - physAddr: "1.2.6"           |  |          
+    |              |                      |  - Command queue (rate limit)  |  |          
+    |              v                      |  - In-memory GA state cache    |  |          
+    |  +-----------------------+          |  - EventEmitter for SSE clients|  |          
+    |  |   repo/knx-repo.ts    | <------> +---------------+----------------+  |          
+    |  |  - ESF Parser         |                          |                   |          
+    |  |  - Logical Device Map |                          | UDP :3671         |          
+    |  |    (SQLite + seed)    |                          | (TunnelUDP)       |          
+    |  +-----------------------+                          v                   |          
+    +-----------------------------------------------------+-------------------+          
+                                                          |
+                                             +------------+------------+
+                                             |   KNX IP Gateway / Bus  |
+                                             |   (Physical: 1.2.6)     |
+                                             +-------------------------+
+  
+  #### Why a Logical Device Mapping Layer is Essential
+  
+  In home-knx.esf, every Group Address (GA) is a separate flat line, and command/status  
+  numbers are not a fixed offset (e.g., 0/0/21 Whz Decke schalten pairs with 0/0/63 Whz  
+  Decke Status, while 0/0/82 pairs with 0/0/83).
+  A single UI widget needs a Logical Device combining multiple GAs:
+  
+    +-----------------------------------------------------------------------+            
+    | LOGICAL DEVICE MODEL (stored in SQLite `knx_devices` or JSON config)  |            
+    +-----------------------------------------------------------------------+            
+    |                                                                       |            
+    |  [Light Device: "KZ Arthur Schreibtisch"]                             |            
+    |    |-- switchGA: "0/0/95"  (DPT 1.001, Write: 0/1)                    |            
+    |    |-- statusGA: null      (DPT 1.001, Read/Listen, fallback switchGA)|            
+    |    +-- dimGA:    "0/0/96"  (DPT 5.001, Write/Listen: 0-100%)          |            
+    |                                                                       |            
+    |  [Blind Device: "Jal KZ rechts, west"]                                |            
+    |    |-- moveGA:      "0/1/14" (DPT 1.008, Write: 0=Up, 1=Down)         |            
+    |    |-- stepStopGA:  "0/1/15" (DPT 1.007, Write: 0/1=Step or Stop)     |            
+    |    |-- posHeightGA: "0/1/70" (DPT 9.xxx/5.001, Listen status)         |            
+    |    +-- posSlatGA:   "0/1/71" (DPT 9.xxx/5.001, Listen status)         |            
+    +-----------------------------------------------------------------------+
+
+/openspec-explore
+
+# frontend interface for KNX-devices
+
+## Overview
+
+I need the frontend to show the interfaces for each device and I need a smart way to build those conponents to write the least ammount of code possible. In my house I have primarely lights and window blinds that I can control but those communicate with diffrent protocols and some lights can dim and others can do rgb and other are simply on off - how do we incooperate this into the UI?
+
+## Your Task
+
+Make a proposal for the UI in the frontend and think about how we can communicte with each lamp and blind (for now only those 2) but keep in mind there can be other devices we will have to acoomidate.
