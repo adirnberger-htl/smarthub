@@ -1,4 +1,7 @@
 :root {
+  /* Unified Minimal & Bold Typography */
+  --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+
   /* Backgrounds & Surfaces */
   --bg-app: #f3f4f6;
   --bg-surface: #ffffff;
@@ -35,6 +38,12 @@
 
   /* Shadows */
   --shadow-widget: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --shadow-overlay: 0 12px 32px rgba(15, 23, 42, 0.12), 0 2px 8px rgba(15, 23, 42, 0.06);
+
+  /* Blind Preview Surfaces */
+  --blind-window-bg: linear-gradient(180deg, #e0f2fe 0%, #f1f5f9 100%);
+  --blind-slat-bg: linear-gradient(180deg, #ffffff 0%, #cbd5e1 100%);
+  --blind-slat-edge: #94a3b8;
 
   /* Transit / Transport */
   --transit-tram: #ef4444;
@@ -83,6 +92,12 @@
 
   /* Shadows */
   --shadow-widget: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-overlay: 0 16px 40px rgba(0, 0, 0, 0.55), 0 2px 10px rgba(0, 0, 0, 0.35);
+
+  /* Blind Preview Surfaces */
+  --blind-window-bg: linear-gradient(180deg, rgba(56, 189, 248, 0.16) 0%, rgba(17, 24, 39, 0.75) 100%);
+  --blind-slat-bg: linear-gradient(180deg, #f8fafc 0%, #94a3b8 100%);
+  --blind-slat-edge: rgba(255, 255, 255, 0.85);
 
   /* Transit / Transport */
   --transit-tram: #f87171;
@@ -94,10 +109,24 @@
   --transit-inactive: #4b5563;
 }
 
+html,
 body {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   background-color: var(--bg-app);
   color: var(--text-primary);
   transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+  letter-spacing: inherit;
 }
 
 /* Global Subtle Scrollbar */

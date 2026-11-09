@@ -9,9 +9,10 @@ import {
 export type OsdMode =
   | 'IDLE'
   | 'TOAST'
-  | 'LED_COLOR'
-  | 'LED_BRIGHTNESS'
-  | 'DESK_BRIGHTNESS'
+  | 'ALL_RGB'
+  | 'ALL_BRIGHTNESS'
+  | 'DEVICE_RGB'
+  | 'DEVICE_BRIGHTNESS'
   | 'BLIND_ANGLE'
 
 export type OsdHardwareAction =
@@ -21,13 +22,13 @@ export type OsdHardwareAction =
   | 'btn4_desk_light'
   | 'btn5_blinds_up'
   | 'btn6_blinds_down'
-  | 'btn7_blind_angle'
   | 'knob_cw'
   | 'knob_ccw'
 
 export type OsdKeymap = Record<OsdHardwareAction, string>
 
 export const OSD_KEYMAP_STORAGE_KEY = 'smarthub_osd_keymap'
+export const DOUBLE_PRESS_WINDOW_MS = 280
 
 export const DEFAULT_OSD_KEYMAP: OsdKeymap = {
   btn1_main_light: 'Digit1',
@@ -36,7 +37,6 @@ export const DEFAULT_OSD_KEYMAP: OsdKeymap = {
   btn4_desk_light: 'Digit4',
   btn5_blinds_up: 'Digit5',
   btn6_blinds_down: 'Digit6',
-  btn7_blind_angle: 'Digit7',
   knob_cw: 'ArrowRight',
   knob_ccw: 'ArrowLeft',
 }
@@ -55,50 +55,44 @@ export const OSD_ACTION_METADATA: Array<{
   },
   {
     action: 'btn2_light_mode',
-    label: 'Button 2 — Light Config Mode',
-    description: 'Cycle knob mode: LED Color → LED Brightness → Desk Brightness → Off',
+    label: 'Button 2 — All Room Lights Mode',
+    description: 'Cycle group knob mode: All Lights RGB → All Lights Brightness → Off',
     icon: 'fa-solid fa-sliders',
   },
   {
     action: 'btn3_room_leds',
     label: 'Button 3 — Room LEDs',
-    description: 'Toggle RGB LED strip on/off',
+    description: 'Single press: toggle on/off (+ turn knob for RGB/Brightness) • Double press: jump straight to RGB',
     icon: 'fa-solid fa-wand-magic-sparkles',
   },
   {
     action: 'btn4_desk_light',
     label: 'Button 4 — Desk Lamp',
-    description: 'Toggle desk lamp (Schreibtischlicht Arthur) on/off',
+    description: 'Single press: toggle on/off (+ turn knob for Brightness) • Double press: jump straight to Brightness',
     icon: 'fa-solid fa-lamp',
   },
   {
     action: 'btn5_blinds_up',
     label: 'Button 5 — Blinds Up',
-    description: 'Move all KZ West window blinds up',
+    description: 'Single press: move blinds up (+ turn knob for Slat Angle) • Double press: jump straight to Slat Angle',
     icon: 'fa-solid fa-angles-up',
   },
   {
     action: 'btn6_blinds_down',
     label: 'Button 6 — Blinds Down',
-    description: 'Move all KZ West window blinds down',
+    description: 'Single press: move blinds down (+ turn knob for Slat Angle) • Double press: jump straight to Slat Angle',
     icon: 'fa-solid fa-angles-down',
-  },
-  {
-    action: 'btn7_blind_angle',
-    label: 'Button 7 — Blind Slat Angle Mode',
-    description: 'Configure window blind slat tilt (0°–90°) with the rotary knob',
-    icon: 'fa-solid fa-bars-staggered',
   },
   {
     action: 'knob_cw',
     label: 'Rotary Knob — Clockwise (+)',
-    description: 'Increase active brightness, RGB hue, or blind slat angle',
+    description: 'Increase active RGB hue, light brightness, or blind slat angle',
     icon: 'fa-solid fa-rotate-right',
   },
   {
     action: 'knob_ccw',
     label: 'Rotary Knob — Counter-Clockwise (−)',
-    description: 'Decrease active brightness, RGB hue, or blind slat angle',
+    description: 'Decrease active RGB hue, light brightness, or blind slat angle',
     icon: 'fa-solid fa-rotate-left',
   },
 ]
@@ -110,7 +104,6 @@ const ALT_DEFAULT_KEY_TO_ACTION: Record<string, OsdHardwareAction> = {
   F16: 'btn4_desk_light',
   F17: 'btn5_blinds_up',
   F18: 'btn6_blinds_down',
-  F19: 'btn7_blind_angle',
   AudioVolumeUp: 'knob_cw',
   AudioVolumeDown: 'knob_ccw',
 }
@@ -171,7 +164,7 @@ export function hexToHue(hex: string): number {
   } else {
     h = (r - g) / d + 4
   }
-  return Math.round(((h * 60) + 360) % 360)
+  return Math.round((h * 60 + 360) % 360)
 }
 
 interface OsdState {
@@ -186,6 +179,7 @@ interface OsdState {
   ledHex: string
   ledBrightness: number
   deskBrightness: number
+  groupBrightness: number
   blindAngle: number
   learningAction: OsdHardwareAction | null
   keymap: OsdKeymap
@@ -196,6 +190,8 @@ let hideTimer: ReturnType<typeof setTimeout> | null = null
 let eventSource: EventSource | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 let listenerAttached = false
+
+const singlePressTimers = new Map<OsdHardwareAction, ReturnType<typeof setTimeout>>()
 
 const throttleState = new Map<
   string,
@@ -278,6 +274,7 @@ export function useDeviceOsd() {
     ledHex: '#00ff66',
     ledBrightness: 100,
     deskBrightness: 75,
+    groupBrightness: 100,
     blindAngle: 0,
     learningAction: null,
     keymap: { ...DEFAULT_OSD_KEYMAP },
@@ -291,10 +288,13 @@ export function useDeviceOsd() {
       if (raw) {
         const parsed = JSON.parse(raw)
         if (parsed && typeof parsed === 'object') {
-          state.value.keymap = {
-            ...DEFAULT_OSD_KEYMAP,
-            ...parsed,
+          const nextMap: OsdKeymap = { ...DEFAULT_OSD_KEYMAP }
+          for (const key of Object.keys(DEFAULT_OSD_KEYMAP) as OsdHardwareAction[]) {
+            if (typeof parsed[key] === 'string' && parsed[key].length > 0) {
+              nextMap[key] = parsed[key]
+            }
           }
+          state.value.keymap = nextMap
         }
       }
     } catch {
@@ -347,6 +347,7 @@ export function useDeviceOsd() {
       }
       if (dev.state.brightness !== undefined) {
         state.value.ledBrightness = dev.state.brightness
+        state.value.groupBrightness = dev.state.brightness
       }
     } else if (dev.id === 'desk-light') {
       if (dev.state.brightness !== undefined) {
@@ -369,11 +370,19 @@ export function useDeviceOsd() {
     }, durationMs)
   }
 
+  function clearSinglePressTimers() {
+    for (const timer of singlePressTimers.values()) {
+      clearTimeout(timer)
+    }
+    singlePressTimers.clear()
+  }
+
   function hideOsdImmediately() {
     if (hideTimer) {
       clearTimeout(hideTimer)
       hideTimer = null
     }
+    clearSinglePressTimers()
     state.value.visible = false
     state.value.mode = 'IDLE'
     state.value.activeDeviceId = null
@@ -413,6 +422,119 @@ export function useDeviceOsd() {
     throttleState.set(id, entry)
   }
 
+  function executeLightToggle(
+    deviceId: 'room-leds' | 'desk-light',
+    title: string,
+    icon: string
+  ) {
+    const dev = state.value.devices[deviceId]
+    const nextOn = !(dev?.state.on ?? false)
+    if (dev) dev.state.on = nextOn
+    state.value.mode = 'TOAST'
+    state.value.activeDeviceId = deviceId
+    state.value.toastTitle = title
+    state.value.toastSubtitle = nextOn ? 'Switched ON' : 'Switched OFF'
+    state.value.toastIcon = icon
+    resetAutoHideTimer()
+    api.sendDeviceCommand(deviceId, { on: nextOn }).then(applySingleDeviceState).catch(() => {})
+  }
+
+  function enterDeviceKnobMode(deviceId: 'room-leds' | 'desk-light') {
+    const dev = state.value.devices[deviceId]
+    state.value.activeDeviceId = deviceId
+    if (dev?.capabilities.includes('rgb')) {
+      state.value.mode = 'DEVICE_RGB'
+    } else {
+      state.value.mode = 'DEVICE_BRIGHTNESS'
+    }
+    resetAutoHideTimer()
+  }
+
+  function handleConfigurableLightButton(
+    action: 'btn3_room_leds' | 'btn4_desk_light',
+    deviceId: 'room-leds' | 'desk-light',
+    title: string,
+    icon: string
+  ) {
+    // If already in individual knob mode for this specific light, step through its modes:
+    // DEVICE_RGB -> DEVICE_BRIGHTNESS -> HIDE
+    if (state.value.visible && state.value.activeDeviceId === deviceId) {
+      if (state.value.mode === 'DEVICE_RGB') {
+        const dev = state.value.devices[deviceId]
+        if (dev?.capabilities.includes('brightness')) {
+          state.value.mode = 'DEVICE_BRIGHTNESS'
+          resetAutoHideTimer()
+        } else {
+          hideOsdImmediately()
+        }
+        return
+      }
+      if (state.value.mode === 'DEVICE_BRIGHTNESS') {
+        hideOsdImmediately()
+        return
+      }
+    }
+
+    // Check for double press within DOUBLE_PRESS_WINDOW_MS
+    const pendingTimer = singlePressTimers.get(action)
+    if (pendingTimer) {
+      clearTimeout(pendingTimer)
+      singlePressTimers.delete(action)
+      enterDeviceKnobMode(deviceId)
+      return
+    }
+
+    const timer = setTimeout(() => {
+      singlePressTimers.delete(action)
+      executeLightToggle(deviceId, title, icon)
+    }, DOUBLE_PRESS_WINDOW_MS)
+    singlePressTimers.set(action, timer)
+  }
+
+  function executeBlindMove(direction: 'up' | 'down') {
+    const dev = state.value.devices['blinds-all']
+    if (dev) dev.state.lastAction = direction
+    state.value.mode = 'TOAST'
+    state.value.activeDeviceId = 'blinds-all'
+    state.value.toastTitle = 'Alle Jalousien KZ West'
+    state.value.toastSubtitle = direction === 'up' ? 'Moving UP ▲' : 'Moving DOWN ▼'
+    state.value.toastIcon =
+      direction === 'up' ? 'fa-solid fa-angles-up' : 'fa-solid fa-angles-down'
+    resetAutoHideTimer()
+    api
+      .sendDeviceCommand('blinds-all', { blindAction: direction })
+      .then(applySingleDeviceState)
+      .catch(() => {})
+  }
+
+  function handleBlindButton(
+    action: 'btn5_blinds_up' | 'btn6_blinds_down',
+    direction: 'up' | 'down'
+  ) {
+    // If already in BLIND_ANGLE mode, pressing a blind button finishes/closes the OSD
+    if (state.value.visible && state.value.mode === 'BLIND_ANGLE') {
+      hideOsdImmediately()
+      return
+    }
+
+    // Check if either blind button has a pending single-press timer (double-press jumps straight to BLIND_ANGLE)
+    const pendingSame = singlePressTimers.get(action)
+    if (pendingSame) {
+      clearTimeout(pendingSame)
+      singlePressTimers.delete(action)
+      state.value.mode = 'BLIND_ANGLE'
+      state.value.activeDeviceId = 'blinds-all'
+      resetAutoHideTimer()
+      return
+    }
+
+    const timer = setTimeout(() => {
+      singlePressTimers.delete(action)
+      executeBlindMove(direction)
+    }, DOUBLE_PRESS_WINDOW_MS)
+    singlePressTimers.set(action, timer)
+  }
+
   function triggerAction(action: OsdHardwareAction) {
     if (action === 'btn1_main_light') {
       const dev = state.value.devices['ceiling-light']
@@ -428,150 +550,165 @@ export function useDeviceOsd() {
       return
     }
 
+    if (action === 'btn2_light_mode') {
+      clearSinglePressTimers()
+      if (!state.value.visible || (state.value.mode !== 'ALL_RGB' && state.value.mode !== 'ALL_BRIGHTNESS')) {
+        state.value.mode = 'ALL_RGB'
+        state.value.activeDeviceId = null
+        resetAutoHideTimer()
+      } else if (state.value.mode === 'ALL_RGB') {
+        state.value.mode = 'ALL_BRIGHTNESS'
+        state.value.activeDeviceId = null
+        resetAutoHideTimer()
+      } else {
+        hideOsdImmediately()
+      }
+      return
+    }
+
     if (action === 'btn3_room_leds') {
-      const dev = state.value.devices['room-leds']
-      const nextOn = !(dev?.state.on ?? false)
-      if (dev) dev.state.on = nextOn
-      state.value.mode = 'TOAST'
-      state.value.activeDeviceId = 'room-leds'
-      state.value.toastTitle = 'LED Strip KZ West'
-      state.value.toastSubtitle = nextOn ? 'Switched ON' : 'Switched OFF'
-      state.value.toastIcon = 'fa-solid fa-wand-magic-sparkles'
-      resetAutoHideTimer()
-      api.sendDeviceCommand('room-leds', { on: nextOn }).then(applySingleDeviceState).catch(() => {})
+      handleConfigurableLightButton(
+        'btn3_room_leds',
+        'room-leds',
+        'LED Strip KZ West',
+        'fa-solid fa-wand-magic-sparkles'
+      )
       return
     }
 
     if (action === 'btn4_desk_light') {
-      const dev = state.value.devices['desk-light']
-      const nextOn = !(dev?.state.on ?? false)
-      if (dev) dev.state.on = nextOn
-      state.value.mode = 'TOAST'
-      state.value.activeDeviceId = 'desk-light'
-      state.value.toastTitle = 'Schreibtischlicht Arthur'
-      state.value.toastSubtitle = nextOn ? 'Switched ON' : 'Switched OFF'
-      state.value.toastIcon = 'fa-solid fa-lamp'
-      resetAutoHideTimer()
-      api.sendDeviceCommand('desk-light', { on: nextOn }).then(applySingleDeviceState).catch(() => {})
+      handleConfigurableLightButton(
+        'btn4_desk_light',
+        'desk-light',
+        'Schreibtischlicht Arthur',
+        'fa-solid fa-lamp'
+      )
       return
     }
 
     if (action === 'btn5_blinds_up') {
-      const dev = state.value.devices['blinds-all']
-      if (dev) dev.state.lastAction = 'up'
-      state.value.mode = 'TOAST'
-      state.value.activeDeviceId = 'blinds-all'
-      state.value.toastTitle = 'Alle Jalousien KZ West'
-      state.value.toastSubtitle = 'Moving UP ▲'
-      state.value.toastIcon = 'fa-solid fa-angles-up'
-      resetAutoHideTimer()
-      api.sendDeviceCommand('blinds-all', { blindAction: 'up' }).then(applySingleDeviceState).catch(() => {})
+      handleBlindButton('btn5_blinds_up', 'up')
       return
     }
 
     if (action === 'btn6_blinds_down') {
-      const dev = state.value.devices['blinds-all']
-      if (dev) dev.state.lastAction = 'down'
-      state.value.mode = 'TOAST'
-      state.value.activeDeviceId = 'blinds-all'
-      state.value.toastTitle = 'Alle Jalousien KZ West'
-      state.value.toastSubtitle = 'Moving DOWN ▼'
-      state.value.toastIcon = 'fa-solid fa-angles-down'
-      resetAutoHideTimer()
-      api.sendDeviceCommand('blinds-all', { blindAction: 'down' }).then(applySingleDeviceState).catch(() => {})
-      return
-    }
-
-    if (action === 'btn2_light_mode') {
-      if (!state.value.visible || state.value.mode === 'IDLE' || state.value.mode === 'TOAST' || state.value.mode === 'BLIND_ANGLE') {
-        state.value.mode = 'LED_COLOR'
-        state.value.activeDeviceId = 'room-leds'
-        resetAutoHideTimer()
-      } else if (state.value.mode === 'LED_COLOR') {
-        state.value.mode = 'LED_BRIGHTNESS'
-        state.value.activeDeviceId = 'room-leds'
-        resetAutoHideTimer()
-      } else if (state.value.mode === 'LED_BRIGHTNESS') {
-        state.value.mode = 'DESK_BRIGHTNESS'
-        state.value.activeDeviceId = 'desk-light'
-        resetAutoHideTimer()
-      } else if (state.value.mode === 'DESK_BRIGHTNESS') {
-        hideOsdImmediately()
-      }
-      return
-    }
-
-    if (action === 'btn7_blind_angle') {
-      if (state.value.visible && state.value.mode === 'BLIND_ANGLE') {
-        hideOsdImmediately()
-      } else {
-        state.value.mode = 'BLIND_ANGLE'
-        state.value.activeDeviceId = 'blinds-all'
-        resetAutoHideTimer()
-      }
+      handleBlindButton('btn6_blinds_down', 'down')
       return
     }
 
     if (action === 'knob_cw' || action === 'knob_ccw') {
       const dir = action === 'knob_cw' ? 1 : -1
 
-      // If OSD is idle or in toast mode, default knob turn to LED_BRIGHTNESS or active mode
-      if (state.value.mode === 'IDLE' || state.value.mode === 'TOAST') {
-        state.value.mode = 'LED_COLOR'
-        state.value.activeDeviceId = 'room-leds'
+      // Transition from TOAST into context-appropriate knob mode when a device was just activated
+      if (state.value.visible && state.value.mode === 'TOAST') {
+        const activeId = state.value.activeDeviceId
+        const dev = activeId ? state.value.devices[activeId] : null
+        if (dev) {
+          if (dev.category === 'blind' && dev.capabilities.includes('blind_angle')) {
+            state.value.mode = 'BLIND_ANGLE'
+          } else if (dev.category === 'light' && dev.state.on) {
+            if (dev.capabilities.includes('rgb')) {
+              state.value.mode = 'DEVICE_RGB'
+            } else if (dev.capabilities.includes('brightness')) {
+              state.value.mode = 'DEVICE_BRIGHTNESS'
+            } else {
+              return
+            }
+          } else {
+            return
+          }
+        } else {
+          return
+        }
+      } else if (!state.value.visible || state.value.mode === 'IDLE') {
+        // Default knob turn from idle opens All Room Lights RGB mode
+        state.value.mode = 'ALL_RGB'
+        state.value.activeDeviceId = null
       }
 
-      if (state.value.mode === 'LED_COLOR') {
+      if (state.value.mode === 'ALL_RGB') {
         const nextHue = ((state.value.ledHue + dir * 10) % 360 + 360) % 360
         const nextHex = hslToHex(nextHue, 100, 50)
         state.value.ledHue = nextHue
         state.value.ledHex = nextHex
-        const dev = state.value.devices['room-leds']
+
+        const rgbLights = Object.values(state.value.devices).filter(
+          (d) => d.category === 'light' && d.capabilities.includes('rgb')
+        )
+        for (const light of rgbLights) {
+          light.state.on = true
+          light.state.rgb = nextHex
+          dispatchCommandThrottled(light.id, { rgb: nextHex })
+        }
+        resetAutoHideTimer()
+        return
+      }
+
+      if (state.value.mode === 'ALL_BRIGHTNESS') {
+        const nextBrightness = Math.max(0, Math.min(100, state.value.groupBrightness + dir * 5))
+        state.value.groupBrightness = nextBrightness
+        state.value.ledBrightness = nextBrightness
+        state.value.deskBrightness = nextBrightness
+
+        const dimmableLights = Object.values(state.value.devices).filter(
+          (d) => d.category === 'light' && d.capabilities.includes('brightness')
+        )
+        for (const light of dimmableLights) {
+          light.state.brightness = nextBrightness
+          light.state.on = nextBrightness > 0
+          dispatchCommandThrottled(light.id, { brightness: nextBrightness })
+        }
+        resetAutoHideTimer()
+        return
+      }
+
+      if (state.value.mode === 'DEVICE_RGB') {
+        const targetId = state.value.activeDeviceId || 'room-leds'
+        const nextHue = ((state.value.ledHue + dir * 10) % 360 + 360) % 360
+        const nextHex = hslToHex(nextHue, 100, 50)
+        state.value.ledHue = nextHue
+        state.value.ledHex = nextHex
+        const dev = state.value.devices[targetId]
         if (dev) {
           dev.state.on = true
           dev.state.rgb = nextHex
         }
         resetAutoHideTimer()
-        dispatchCommandThrottled('room-leds', { rgb: nextHex })
+        dispatchCommandThrottled(targetId, { rgb: nextHex })
         return
       }
 
-      if (state.value.mode === 'LED_BRIGHTNESS') {
-        const nextBrightness = Math.max(0, Math.min(100, state.value.ledBrightness + dir * 5))
-        state.value.ledBrightness = nextBrightness
-        const dev = state.value.devices['room-leds']
+      if (state.value.mode === 'DEVICE_BRIGHTNESS') {
+        const targetId = state.value.activeDeviceId || 'desk-light'
+        const currentVal =
+          targetId === 'room-leds' ? state.value.ledBrightness : state.value.deskBrightness
+        const nextBrightness = Math.max(0, Math.min(100, currentVal + dir * 5))
+        if (targetId === 'room-leds') {
+          state.value.ledBrightness = nextBrightness
+        } else {
+          state.value.deskBrightness = nextBrightness
+        }
+        const dev = state.value.devices[targetId]
         if (dev) {
           dev.state.brightness = nextBrightness
           dev.state.on = nextBrightness > 0
         }
         resetAutoHideTimer()
-        dispatchCommandThrottled('room-leds', { brightness: nextBrightness })
-        return
-      }
-
-      if (state.value.mode === 'DESK_BRIGHTNESS') {
-        const nextBrightness = Math.max(0, Math.min(100, state.value.deskBrightness + dir * 5))
-        state.value.deskBrightness = nextBrightness
-        const dev = state.value.devices['desk-light']
-        if (dev) {
-          dev.state.brightness = nextBrightness
-          dev.state.on = nextBrightness > 0
-        }
-        resetAutoHideTimer()
-        dispatchCommandThrottled('desk-light', { brightness: nextBrightness })
+        dispatchCommandThrottled(targetId, { brightness: nextBrightness })
         return
       }
 
       if (state.value.mode === 'BLIND_ANGLE') {
+        const targetId = state.value.activeDeviceId || 'blinds-all'
         const nextAngle = Math.max(0, Math.min(100, state.value.blindAngle + dir * 5))
         state.value.blindAngle = nextAngle
-        const dev = state.value.devices['blinds-all']
+        const dev = state.value.devices[targetId]
         if (dev) {
           dev.state.slatAngle = nextAngle
           dev.state.lastAction = dir > 0 ? 'stepDown' : 'stepUp'
         }
         resetAutoHideTimer()
-        dispatchCommandThrottled('blinds-all', { slatAngle: nextAngle })
+        dispatchCommandThrottled(targetId, { slatAngle: nextAngle })
       }
     }
   }
@@ -692,6 +829,7 @@ export function useDeviceOsd() {
       window.removeEventListener('keydown', handleKeyDown)
       listenerAttached = false
     }
+    clearSinglePressTimers()
     if (eventSource) {
       eventSource.close()
       eventSource = null

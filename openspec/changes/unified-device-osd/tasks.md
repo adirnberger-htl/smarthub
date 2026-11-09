@@ -9,9 +9,13 @@
 ## 2. Frontend API Client & Hardware OSD State Machine
 
 - [x] 2.1 Add `SmartDeviceDTO` / `DeviceCommandDTO` types and `fetchDevices()`, `sendDeviceCommand(id, cmd)`, and `getDevicesEventsUrl()` methods to `_frontend/smarthub/app/composables/use-smarthub-api.ts`; verify types check cleanly
-- [x] 2.2 Create `_frontend/smarthub/app/composables/use-device-osd.ts` implementing SSE state synchronization, global `keydown` listener for the 7 buttons + rotary knob (`CW`/`CCW`), mode cycling (`LED_COLOR` -> `LED_BRIGHTNESS` -> `DESK_BRIGHTNESS`, `BLIND_ANGLE`), 150ms throttled command dispatch, 4s auto-hide timer, and configurable keybindings in `localStorage`; verify state transitions for each button and knob event
+- [x] 2.2 Update `_frontend/smarthub/app/composables/use-device-osd.ts` to use the 6-button + rotary knob model (removing `btn7_blind_angle`), implementing:
+  - Button 2 group mode cycling (`ALL_RGB` for all `rgb` lights -> `ALL_BRIGHTNESS` for all `brightness` lights -> hide)
+  - Single-press toggle + knob turn to enter individual `DEVICE_RGB` / `DEVICE_BRIGHTNESS` on Buttons 3 & 4, and button re-press to step `DEVICE_RGB` -> `DEVICE_BRIGHTNESS` -> hide
+  - Single-press blind move + knob turn to enter `BLIND_ANGLE` on Buttons 5 & 6
+  - Double-press (~280ms window) on Buttons 3, 4, 5, 6 to skip on/off or blind movement and jump straight into `DEVICE_RGB`, `DEVICE_BRIGHTNESS`, or `BLIND_ANGLE`
 
 ## 3. Global OSD Overlay Component & Keymap Settings UI
 
-- [x] 3.1 Create `_frontend/smarthub/app/components/device-osd-overlay.vue` rendering the auto-hiding glassmorphic HUD for quick toggles, RGB hue spectrum + glowing color swatch, brightness progress bar, and dynamically tilted blind slats (`transform: rotate(...)`), and mount it in `_frontend/smarthub/app/app.vue`; verify the overlay appears and auto-hides on simulated key presses
-- [x] 3.2 Add a "Hardware Keypad & Knob Mapping" section to `_frontend/smarthub/app/pages/settings.vue` allowing the user to click an action and press a physical USB key/knob to rebind it; verify rebinding persists and triggers the mapped OSD action
+- [x] 3.1 Restyle `_frontend/smarthub/app/components/device-osd-overlay.vue` and `_frontend/smarthub/app/assets/css/theme.css` (plus `.ios-toast` in `settings.vue`) to match SmartHub's Light and Dark mode UI (`--bg-surface`, `--text-primary`, `--border-base`, `--color-primary`, `--bg-primary-light`, `--weather-dest-*`, `--shadow-widget`), rendering `TOAST` as a compact single-row pill (Option B) and knob modes (`ALL_RGB`, `ALL_BRIGHTNESS`, `DEVICE_RGB`, `DEVICE_BRIGHTNESS`, `BLIND_ANGLE`) as a theme-aware widget card
+- [x] 3.2 Verify `_frontend/smarthub/app/pages/settings.vue` hardware keymap learner reflects the 6-button + knob action metadata and supports testing/rebinding each action cleanly

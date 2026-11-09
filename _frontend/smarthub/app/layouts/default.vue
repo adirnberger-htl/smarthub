@@ -19,7 +19,7 @@ const isDashboard = computed(() => route.path === '/dashboard' || route.path ===
   height: 100vh;
   background: var(--bg-app);
   color: var(--text-primary);
-  font-family: 'Segoe UI', Arial, sans-serif;
+  font-family: var(--font-sans);
   display: flex;
   flex-direction: column;
 }

@@ -13,7 +13,7 @@
   align-items: center;
   justify-content: center;
 
-  font-family: 'Segoe UI', Arial, sans-serif;
+  font-family: var(--font-sans);
 
   background: linear-gradient(135deg, #3b82f6, #6366f1);
 }

@@ -315,9 +315,10 @@ const weatherIcon = computed(() => {
 
 .weather-widget__temp {
   font-size: 3.5rem;
-  font-weight: 200;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
   color: var(--theme-color);
-  letter-spacing: -0.05em;
+  letter-spacing: -0.04em;
   line-height: 1;
   text-align: center;
   transition: color 0.4s ease;
@@ -325,10 +326,10 @@ const weatherIcon = computed(() => {
 
 .weather-widget__sky {
   font-size: 1.05rem;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--text-muted);
   text-transform: capitalize;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.01em;
   text-align: center;
 }
 

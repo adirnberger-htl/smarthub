@@ -2,15 +2,19 @@
 
 ## Why
 
-The smart home display is a non-touch wall screen controlled exclusively via a physical USB keypad (7 tactile buttons) and rotary encoder knob, while devices in the room span multiple protocols and capabilities (KNX on/off lights, KNX dimmable lights, RGB LED lights, and KNX window blinds with slat angles). We need a unified, protocol-agnostic backend device API (`SmartDeviceDTO` / `DeviceCommandDTO`) and a minimal-code On-Screen Display (OSD) frontend HUD that pops up on physical button/knob input without requiring per-device UI components.
+The smart home display is a non-touch wall screen controlled exclusively via a physical USB keypad (6 tactile buttons) and rotary encoder knob, while devices in the room span multiple protocols and capabilities (KNX on/off lights, KNX dimmable lights, RGB LED lights, and KNX window blinds with slat angles). We need a unified, protocol-agnostic backend device API (`SmartDeviceDTO` / `DeviceCommandDTO`) and a theme-aware On-Screen Display (OSD) frontend HUD that blends naturally into SmartHub's Light and Dark mode design system (`theme.css`) and supports intuitive single-press, double-press, and rotary knob interactions without per-device UI cards.
 
 ## What Changes
 
 - **BREAKING**: Replace protocol-specific `/api/knx/devices`, `/api/knx/lights/:id`, `/api/knx/blinds/:id`, and `/api/knx/events` routes with a unified `/api/devices` API (`GET /api/devices`, `POST /api/devices/:id`, `GET /api/devices/events`).
 - Introduce a single normalized `SmartDeviceDTO` (exposing `id`, `name`, `room`, `category`, `capabilities`, and `state` without leaking KNX group addresses) and `DeviceCommandDTO` (`on`, `brightness`, `rgb`, `blindAction`, `slatAngle`).
 - Add a backend `DeviceService` dispatcher that validates commands against device capabilities and routes execution to protocol adapters (`KnxService` for KNX devices and `LedService` for RGB LED strips).
-- Add a frontend USB HID keyboard/rotary-knob state machine composable (`use-device-osd.ts`) supporting direct device toggles (main light, room LEDs, desk lamp, blinds up/down) and multi-step rotary knob configuration modes (LED color, LED brightness, desk brightness, blind slat angle) with configurable key bindings.
-- Add a single reactive `<DeviceOsdOverlay>` HUD component mounted globally that pops up on physical input, renders live 60fps visual feedback (including RGB color swatch/spectrum, brightness bars, and dynamically tilted blind slats), and auto-hides after inactivity.
+- Add a frontend USB HID keyboard/rotary-knob state machine composable (`use-device-osd.ts`) for 6 buttons + rotary knob (`CW`/`CCW`):
+  - **Button 1 (`ceiling-light`)**: Single press toggles main ceiling light on/off with a compact toast pill.
+  - **Button 2 (All Room Lights Group Config)**: Cycles `ALL_RGB` (adjusts RGB hue for all `rgb`-capable room lights) -> `ALL_BRIGHTNESS` (adjusts brightness for all `brightness`-capable room lights) -> Hides OSD.
+  - **Button 3 (`room-leds`) & Button 4 (`desk-light`)**: Single press toggles the light on/off and shows a compact toast pill; turning the knob while the switched-on toast is visible enters individual `DEVICE_RGB` (if supported) or `DEVICE_BRIGHTNESS`, and pressing the same button again steps from `DEVICE_RGB` -> `DEVICE_BRIGHTNESS` -> Hides OSD. Double-pressing the button skips the on/off toggle and jumps straight into `DEVICE_RGB` (or `DEVICE_BRIGHTNESS` if RGB is not supported).
+  - **Button 5 (`blinds-all` Up) & Button 6 (`blinds-all` Down)**: Single press moves blinds up/down and shows a compact toast pill; turning the knob while the toast is visible enters `BLIND_ANGLE` mode. Double-pressing Button 5 or 6 skips moving the blinds and jumps straight into `BLIND_ANGLE` mode.
+- Restyle `<DeviceOsdOverlay>` (`device-osd-overlay.vue`) and settings notifications (`settings.vue`) to use `theme.css` variables (`--bg-surface`, `--text-primary`, `--border-base`, `--color-primary`, `--bg-primary-light`, `--weather-dest-*`, `--shadow-widget`) so they match the rest of the SmartHub UI across Light and Dark modes, rendering `TOAST` as a compact single-row pill and expanding into a widget-styled card for rotary knob modes.
 
 ## Capabilities
 

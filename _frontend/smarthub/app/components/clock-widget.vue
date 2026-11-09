@@ -185,14 +185,15 @@ onUnmounted(() => clearInterval(interval))
 
 .clock-widget__time {
   font-size: 3rem;
-  font-weight: 700;
-  color: var(--text-primary);
-  letter-spacing: 0.02em;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary-strong);
+  letter-spacing: -0.03em;
 }
 
 .clock-widget__date {
   font-size: 1.25rem;
-  font-weight: 500;
+  font-weight: 700;
   color: var(--text-secondary);
 }
 

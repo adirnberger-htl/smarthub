@@ -1,8 +1,34 @@
 <template>
   <Transition name="osd-fade">
-    <div v-if="state.visible" class="osd-overlay" role="status" aria-live="polite">
-      <div class="osd-card">
-        <!-- Mode pill badge -->
+    <div
+      v-if="state.visible && state.mode !== 'IDLE'"
+      class="osd-overlay"
+      :class="{ 'osd-overlay--compact': state.mode === 'TOAST' }"
+      role="status"
+      aria-live="polite"
+    >
+      <!-- Option B: Compact Single-Row Pill for Quick Toggles / Blind Moves -->
+      <div v-if="state.mode === 'TOAST'" class="osd-pill">
+        <div class="osd-pill__icon">
+          <i :class="headerIcon"></i>
+        </div>
+        <div class="osd-pill__info">
+          <span class="osd-pill__title">{{ headerTitle }}</span>
+          <span v-if="toastKnobHint" class="osd-pill__hint">
+            <i class="fa-solid fa-rotate"></i> {{ toastKnobHint }}
+          </span>
+        </div>
+        <div
+          class="osd-status-indicator"
+          :class="{ 'osd-status-indicator--on': isToastDeviceOn }"
+        >
+          <span class="osd-status-dot"></span>
+          <span>{{ state.toastSubtitle }}</span>
+        </div>
+      </div>
+
+      <!-- Expanded Widget Card for Interactive Rotary Knob Modes -->
+      <div v-else class="osd-card">
         <div class="osd-header">
           <div class="osd-icon-badge" :style="iconBadgeStyle">
             <i :class="headerIcon"></i>
@@ -16,29 +42,27 @@
           </div>
         </div>
 
-        <!-- 1. Quick Toggle / Action Toast -->
-        <div v-if="state.mode === 'TOAST'" class="osd-body osd-body--toast">
-          <div class="osd-status-indicator" :class="{ 'osd-status-indicator--on': isToastDeviceOn }">
-            <span class="osd-status-dot"></span>
-            <span>{{ state.toastSubtitle }}</span>
-          </div>
-        </div>
-
-        <!-- 2. RGB LED Color Mode -->
-        <div v-else-if="state.mode === 'LED_COLOR'" class="osd-body">
+        <!-- 1. RGB Color Mode (All Lights or Individual Light) -->
+        <div
+          v-if="state.mode === 'ALL_RGB' || state.mode === 'DEVICE_RGB'"
+          class="osd-body"
+        >
           <div class="osd-rgb-row">
             <div
               class="osd-color-swatch"
               :style="{
                 backgroundColor: state.ledHex,
-                boxShadow: `0 0 24px ${state.ledHex}, inset 0 0 8px rgba(255,255,255,0.5)`,
+                boxShadow: `0 0 18px ${state.ledHex}66`,
               }"
             ></div>
             <div class="osd-spectrum-wrap">
               <div class="osd-spectrum-bar">
                 <div
                   class="osd-spectrum-thumb"
-                  :style="{ left: `${(state.ledHue / 360) * 100}%`, borderColor: state.ledHex }"
+                  :style="{
+                    left: `${(state.ledHue / 360) * 100}%`,
+                    borderColor: state.ledHex,
+                  }"
                 ></div>
               </div>
               <div class="osd-meta-row">
@@ -49,13 +73,22 @@
           </div>
           <div class="osd-hint">
             <span><i class="fa-solid fa-rotate"></i> Turn knob to change color</span>
-            <span><i class="fa-solid fa-sliders"></i> Press Button 2 for LED Brightness</span>
+            <span>
+              <i class="fa-solid fa-sliders"></i>
+              {{
+                state.mode === 'ALL_RGB'
+                  ? 'Press Button 2 for All Brightness'
+                  : 'Press light button for Brightness'
+              }}
+            </span>
           </div>
         </div>
 
-        <!-- 3. LED Brightness or Desk Lamp Brightness Mode -->
+        <!-- 2. Brightness Mode (All Lights or Individual Light) -->
         <div
-          v-else-if="state.mode === 'LED_BRIGHTNESS' || state.mode === 'DESK_BRIGHTNESS'"
+          v-else-if="
+            state.mode === 'ALL_BRIGHTNESS' || state.mode === 'DEVICE_BRIGHTNESS'
+          "
           class="osd-body"
         >
           <div class="osd-progress-header">
@@ -67,27 +100,24 @@
               class="osd-progress-fill"
               :style="{
                 width: `${activeBrightness}%`,
-                background:
-                  state.mode === 'LED_BRIGHTNESS'
-                    ? `linear-gradient(90deg, ${state.ledHex}, #ffffff)`
-                    : 'linear-gradient(90deg, #f59e0b, #fde047)',
+                background: brightnessFillGradient,
               }"
             ></div>
           </div>
           <div class="osd-hint">
             <span><i class="fa-solid fa-rotate"></i> Turn knob to dim (0–100%)</span>
             <span>
-              <i class="fa-solid fa-sliders"></i>
+              <i class="fa-solid fa-check"></i>
               {{
-                state.mode === 'LED_BRIGHTNESS'
-                  ? 'Press Button 2 for Desk Brightness'
-                  : 'Press Button 2 to Finish'
+                state.mode === 'ALL_BRIGHTNESS'
+                  ? 'Press Button 2 to Finish'
+                  : 'Press light button to Finish'
               }}
             </span>
           </div>
         </div>
 
-        <!-- 4. Window Blind Slat Angle Mode -->
+        <!-- 3. Window Blind Slat Angle Mode -->
         <div v-else-if="state.mode === 'BLIND_ANGLE'" class="osd-body">
           <div class="osd-blind-layout">
             <div class="osd-blind-window" aria-label="Window blind slat angle preview">
@@ -120,7 +150,7 @@
           </div>
           <div class="osd-hint">
             <span><i class="fa-solid fa-rotate"></i> Turn knob to tilt blind slats</span>
-            <span><i class="fa-solid fa-bars-staggered"></i> Press Button 7 to close</span>
+            <span><i class="fa-solid fa-check"></i> Press Blind button to Finish</span>
           </div>
         </div>
       </div>
@@ -132,7 +162,7 @@
 import { computed, onMounted, onUnmounted } from 'vue'
 import { useDeviceOsd } from '../composables/use-device-osd'
 
-const { state, initDeviceOsd, destroyDeviceOsd } = useDeviceOsd()
+const { state, activeDevice, initDeviceOsd, destroyDeviceOsd } = useDeviceOsd()
 
 onMounted(() => {
   initDeviceOsd()
@@ -142,31 +172,61 @@ onUnmounted(() => {
   destroyDeviceOsd()
 })
 
-const activeBrightness = computed(() =>
-  state.value.mode === 'LED_BRIGHTNESS'
-    ? state.value.ledBrightness
-    : state.value.deskBrightness
-)
+const activeBrightness = computed(() => {
+  if (state.value.mode === 'ALL_BRIGHTNESS') {
+    return state.value.groupBrightness
+  }
+  if (state.value.activeDeviceId === 'room-leds') {
+    return state.value.ledBrightness
+  }
+  return state.value.deskBrightness
+})
+
+const brightnessFillGradient = computed(() => {
+  if (
+    state.value.mode === 'DEVICE_BRIGHTNESS' &&
+    state.value.activeDeviceId === 'room-leds'
+  ) {
+    return `linear-gradient(90deg, ${state.value.ledHex}, var(--color-primary))`
+  }
+  return 'linear-gradient(90deg, var(--color-primary), #f59e0b)'
+})
 
 const slatTiltDegrees = computed(() => Math.round((state.value.blindAngle / 100) * 90))
 
 const isToastDeviceOn = computed(() => {
-  const id = state.value.activeDeviceId
-  if (!id) return false
-  const dev = state.value.devices[id]
+  const dev = activeDevice.value
   if (!dev) return false
-  if (dev.category === 'blind') return dev.state.lastAction === 'up' || dev.state.lastAction === 'down'
+  if (dev.category === 'blind') {
+    return dev.state.lastAction === 'up' || dev.state.lastAction === 'down'
+  }
   return Boolean(dev.state.on)
+})
+
+const toastKnobHint = computed(() => {
+  const dev = activeDevice.value
+  if (!dev) return ''
+  if (dev.category === 'blind' && dev.capabilities.includes('blind_angle')) {
+    return 'Turn knob for Slat Angle'
+  }
+  if (dev.category === 'light' && dev.state.on) {
+    if (dev.capabilities.includes('rgb')) return 'Turn knob for RGB'
+    if (dev.capabilities.includes('brightness')) return 'Turn knob for Brightness'
+  }
+  return ''
 })
 
 const headerIcon = computed(() => {
   switch (state.value.mode) {
-    case 'LED_COLOR':
+    case 'ALL_RGB':
+    case 'DEVICE_RGB':
       return 'fa-solid fa-palette'
-    case 'LED_BRIGHTNESS':
+    case 'ALL_BRIGHTNESS':
       return 'fa-solid fa-sun'
-    case 'DESK_BRIGHTNESS':
-      return 'fa-solid fa-lamp'
+    case 'DEVICE_BRIGHTNESS':
+      return state.value.activeDeviceId === 'desk-light'
+        ? 'fa-solid fa-lamp'
+        : 'fa-solid fa-sun'
     case 'BLIND_ANGLE':
       return 'fa-solid fa-bars-staggered'
     default:
@@ -176,12 +236,14 @@ const headerIcon = computed(() => {
 
 const headerTitle = computed(() => {
   switch (state.value.mode) {
-    case 'LED_COLOR':
-      return 'LED Strip KZ West — RGB Color'
-    case 'LED_BRIGHTNESS':
-      return 'LED Strip KZ West — Brightness'
-    case 'DESK_BRIGHTNESS':
-      return 'Schreibtischlicht Arthur — Brightness'
+    case 'ALL_RGB':
+      return 'All Room Lights — RGB Color'
+    case 'ALL_BRIGHTNESS':
+      return 'All Room Lights — Brightness'
+    case 'DEVICE_RGB':
+      return `${activeDevice.value?.name || 'LED Strip KZ West'} — RGB Color`
+    case 'DEVICE_BRIGHTNESS':
+      return `${activeDevice.value?.name || 'Schreibtischlicht Arthur'} — Brightness`
     case 'BLIND_ANGLE':
       return 'Alle Jalousien KZ West — Slat Angle'
     default:
@@ -191,12 +253,16 @@ const headerTitle = computed(() => {
 
 const headerSubtitle = computed(() => {
   switch (state.value.mode) {
-    case 'LED_COLOR':
-      return 'Rotary Knob Config • Step 1 of 3'
-    case 'LED_BRIGHTNESS':
-      return 'Rotary Knob Config • Step 2 of 3'
-    case 'DESK_BRIGHTNESS':
-      return 'Rotary Knob Config • Step 3 of 3'
+    case 'ALL_RGB':
+      return 'Group Light Config • Step 1 of 2'
+    case 'ALL_BRIGHTNESS':
+      return 'Group Light Config • Step 2 of 2 (LEDs + Desk)'
+    case 'DEVICE_RGB':
+      return 'Individual Light Config • Step 1 of 2'
+    case 'DEVICE_BRIGHTNESS':
+      return activeDevice.value?.capabilities.includes('rgb')
+        ? 'Individual Light Config • Step 2 of 2'
+        : 'Individual Light Config • Brightness'
     case 'BLIND_ANGLE':
       return 'Rotary Knob Config • Slat Tilt'
     default:
@@ -206,12 +272,13 @@ const headerSubtitle = computed(() => {
 
 const modeStepBadge = computed(() => {
   switch (state.value.mode) {
-    case 'LED_COLOR':
-      return '1 / 3'
-    case 'LED_BRIGHTNESS':
-      return '2 / 3'
-    case 'DESK_BRIGHTNESS':
-      return '3 / 3'
+    case 'ALL_RGB':
+    case 'DEVICE_RGB':
+      return '1 / 2'
+    case 'ALL_BRIGHTNESS':
+      return '2 / 2'
+    case 'DEVICE_BRIGHTNESS':
+      return activeDevice.value?.capabilities.includes('rgb') ? '2 / 2' : 'DIM'
     case 'BLIND_ANGLE':
       return 'SLATS'
     default:
@@ -220,11 +287,11 @@ const modeStepBadge = computed(() => {
 })
 
 const iconBadgeStyle = computed(() => {
-  if (state.value.mode === 'LED_COLOR' || state.value.mode === 'LED_BRIGHTNESS') {
+  if (state.value.mode === 'ALL_RGB' || state.value.mode === 'DEVICE_RGB') {
     return {
-      background: `${state.value.ledHex}28`,
+      background: `${state.value.ledHex}22`,
       color: state.value.ledHex,
-      borderColor: `${state.value.ledHex}66`,
+      borderColor: `${state.value.ledHex}55`,
     }
   }
   return {}
@@ -234,26 +301,83 @@ const iconBadgeStyle = computed(() => {
 <style scoped>
 .osd-overlay {
   position: fixed;
-  bottom: 36px;
+  bottom: 28px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 10000;
   pointer-events: none;
   width: min(92vw, 480px);
+  font-family: var(--font-sans);
 }
 
+.osd-overlay--compact {
+  width: auto;
+  max-width: min(92vw, 520px);
+}
+
+/* ── Option B: Compact Single-Row Pill (TOAST Mode) ── */
+.osd-pill {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-base);
+  border-radius: 999px;
+  padding: 10px 14px 10px 12px;
+  color: var(--text-primary);
+  box-shadow: var(--shadow-overlay);
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease;
+}
+
+.osd-pill__icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--bg-primary-light);
+  color: var(--color-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+.osd-pill__info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding-right: 4px;
+}
+
+.osd-pill__title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-primary-strong);
+  white-space: nowrap;
+}
+
+.osd-pill__hint {
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ── Expanded Widget Card (Rotary Knob Modes) ── */
 .osd-card {
-  background: rgba(18, 22, 32, 0.88);
-  backdrop-filter: blur(22px) saturate(160%);
-  -webkit-backdrop-filter: blur(22px) saturate(160%);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 24px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-base);
+  border-radius: 16px;
   padding: 20px 24px;
-  color: #f8fafc;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-overlay);
   display: flex;
   flex-direction: column;
   gap: 16px;
+  transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease;
 }
 
 .osd-header {
@@ -263,16 +387,16 @@ const iconBadgeStyle = computed(() => {
 }
 
 .osd-icon-badge {
-  width: 46px;
-  height: 46px;
-  border-radius: 14px;
-  background: rgba(99, 102, 241, 0.2);
-  border: 1px solid rgba(99, 102, 241, 0.4);
-  color: #818cf8;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--bg-primary-light);
+  border: 1px solid var(--border-base);
+  color: var(--color-primary);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.25rem;
+  font-size: 1.2rem;
   flex-shrink: 0;
 }
 
@@ -284,7 +408,7 @@ const iconBadgeStyle = computed(() => {
 .osd-title {
   font-size: 1.05rem;
   font-weight: 700;
-  color: #ffffff;
+  color: var(--text-primary-strong);
   letter-spacing: -0.01em;
   white-space: nowrap;
   overflow: hidden;
@@ -293,7 +417,7 @@ const iconBadgeStyle = computed(() => {
 
 .osd-subtitle {
   font-size: 0.8rem;
-  color: #94a3b8;
+  color: var(--text-muted);
   margin-top: 2px;
 }
 
@@ -302,8 +426,8 @@ const iconBadgeStyle = computed(() => {
   border-radius: 999px;
   font-size: 0.75rem;
   font-weight: 700;
-  background: rgba(255, 255, 255, 0.1);
-  color: #e2e8f0;
+  background: var(--bg-primary-light);
+  color: var(--color-primary);
   letter-spacing: 0.04em;
 }
 
@@ -313,37 +437,36 @@ const iconBadgeStyle = computed(() => {
   gap: 12px;
 }
 
-.osd-body--toast {
-  padding-top: 2px;
-}
-
 .osd-status-indicator {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 16px;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.06);
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--bg-surface-hover);
+  border: 1px solid var(--border-base);
   font-weight: 600;
-  font-size: 0.95rem;
-  color: #cbd5e1;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
 }
 
 .osd-status-indicator--on {
-  background: rgba(34, 197, 94, 0.16);
-  color: #4ade80;
+  background: var(--weather-dest-bg);
+  border-color: transparent;
+  color: var(--weather-dest-color);
 }
 
 .osd-status-dot {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  background: #64748b;
+  background: var(--text-light);
 }
 
 .osd-status-indicator--on .osd-status-dot {
-  background: #22c55e;
-  box-shadow: 0 0 10px #22c55e;
+  background: var(--weather-dest-color);
+  box-shadow: 0 0 8px var(--weather-dest-color);
 }
 
 .osd-rgb-row {
@@ -353,10 +476,10 @@ const iconBadgeStyle = computed(() => {
 }
 
 .osd-color-swatch {
-  width: 52px;
-  height: 52px;
-  border-radius: 16px;
-  border: 2px solid rgba(255, 255, 255, 0.75);
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  border: 2px solid var(--border-strong);
   flex-shrink: 0;
   transition: background-color 0.06s linear, box-shadow 0.06s linear;
 }
@@ -370,7 +493,7 @@ const iconBadgeStyle = computed(() => {
 
 .osd-spectrum-bar {
   position: relative;
-  height: 16px;
+  height: 14px;
   border-radius: 999px;
   background: linear-gradient(
     90deg,
@@ -382,19 +505,19 @@ const iconBadgeStyle = computed(() => {
     #ff00ff 83%,
     #ff0000 100%
   );
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.4);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.25);
 }
 
 .osd-spectrum-thumb {
   position: absolute;
   top: 50%;
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   background: #ffffff;
   border: 3px solid #00ff66;
   transform: translate(-50%, -50%);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
   transition: left 0.05s linear;
 }
 
@@ -402,12 +525,15 @@ const iconBadgeStyle = computed(() => {
   display: flex;
   justify-content: space-between;
   font-size: 0.8rem;
-  color: #cbd5e1;
+  color: var(--text-secondary);
   font-weight: 600;
 }
 
 .osd-mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--font-sans);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
 }
 
 .osd-progress-header {
@@ -415,21 +541,22 @@ const iconBadgeStyle = computed(() => {
   justify-content: space-between;
   align-items: baseline;
   font-size: 0.85rem;
-  color: #cbd5e1;
-  font-weight: 600;
+  color: var(--text-secondary);
+  font-weight: 700;
 }
 
 .osd-value-large {
   font-size: 1.5rem;
   font-weight: 800;
-  color: #ffffff;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary-strong);
   letter-spacing: -0.02em;
 }
 
 .osd-progress-track {
-  height: 14px;
+  height: 12px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--border-base);
   overflow: hidden;
 }
 
@@ -445,7 +572,7 @@ const iconBadgeStyle = computed(() => {
 }
 
 .osd-progress-fill--blind {
-  background: linear-gradient(90deg, #38bdf8, #6366f1);
+  background: linear-gradient(90deg, var(--color-primary), var(--transit-train));
 }
 
 .osd-blind-layout {
@@ -458,8 +585,8 @@ const iconBadgeStyle = computed(() => {
   width: 120px;
   height: 104px;
   border-radius: 12px;
-  border: 2px solid rgba(255, 255, 255, 0.22);
-  background: linear-gradient(180deg, rgba(56, 189, 248, 0.18), rgba(15, 23, 42, 0.65));
+  border: 1px solid var(--border-strong);
+  background: var(--blind-window-bg);
   padding: 8px 10px;
   display: flex;
   flex-direction: column;
@@ -471,8 +598,8 @@ const iconBadgeStyle = computed(() => {
   position: relative;
   height: 10px;
   border-radius: 3px;
-  background: linear-gradient(180deg, #f8fafc 0%, #94a3b8 100%);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.35);
+  background: var(--blind-slat-bg);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
   transform-origin: center center;
   transition: transform 0.05s linear;
 }
@@ -481,7 +608,7 @@ const iconBadgeStyle = computed(() => {
   display: block;
   width: 100%;
   height: 2px;
-  background: rgba(255, 255, 255, 0.85);
+  background: var(--blind-slat-edge);
 }
 
 .osd-blind-metrics {
@@ -495,7 +622,7 @@ const iconBadgeStyle = computed(() => {
   display: flex;
   justify-content: space-between;
   font-size: 0.72rem;
-  color: #94a3b8;
+  color: var(--text-muted);
   margin-top: 4px;
 }
 
@@ -503,20 +630,20 @@ const iconBadgeStyle = computed(() => {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  padding-top: 8px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 10px;
+  border-top: 1px solid var(--border-light);
   font-size: 0.75rem;
-  color: #94a3b8;
+  color: var(--text-muted);
 }
 
 .osd-fade-enter-active,
 .osd-fade-leave-active {
-  transition: opacity 0.22s ease, transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: opacity 0.2s ease, transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .osd-fade-enter-from,
 .osd-fade-leave-to {
   opacity: 0;
-  transform: translate(-50%, 16px) scale(0.96);
+  transform: translate(-50%, 14px) scale(0.97);
 }
 </style>

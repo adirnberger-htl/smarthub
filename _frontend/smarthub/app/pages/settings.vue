@@ -483,7 +483,7 @@ onMounted(async () => {
         <div class="routine-card">
           <div class="routine-card__body" style="padding: 16px 20px; display: flex; flex-direction: column; gap: 12px;">
             <p class="helper-text" style="margin: 0 0 4px 0;">
-              Click a key badge below, then press a button or turn the rotary knob on your USB keypad to bind that hardware event. Press <b>Esc</b> to cancel.
+              Click a key badge below, then press one of the 6 buttons or turn the rotary knob on your USB keypad to bind it. Double-press light or blind buttons (or click <b>Test</b> twice quickly) to jump straight to RGB, Brightness, or Slat Angle config. Press <b>Esc</b> to cancel learning.
             </p>
 
             <div
@@ -521,7 +521,8 @@ onMounted(async () => {
                   :style="{
                     minWidth: '140px',
                     textAlign: 'center',
-                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                    fontWeight: 700,
+                    letterSpacing: '0.01em',
                     background: osdState.learningAction === meta.action ? 'var(--color-primary)' : 'var(--border-strong)',
                     color: osdState.learningAction === meta.action ? '#ffffff' : 'var(--text-primary-strong)',
                   }"
@@ -602,17 +603,15 @@ onMounted(async () => {
   top: 32px;
   left: 50%;
   transform: translateX(-50%);
-  background: rgba(255, 255, 255, 0.95);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  background: var(--bg-surface);
   padding: 12px 20px;
-  border-radius: 30px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.05);
+  border-radius: 999px;
+  box-shadow: var(--shadow-overlay);
   display: flex;
   align-items: center;
   gap: 12px;
   z-index: 9999;
-  border: 1px solid rgba(0,0,0,0.05);
+  border: 1px solid var(--border-base);
 }
 
 .ios-toast-icon {
@@ -621,8 +620,8 @@ onMounted(async () => {
 
 .ios-toast-text {
   font-size: 0.95rem;
-  font-weight: 500;
-  color: #1c1c1e;
+  font-weight: 600;
+  color: var(--text-primary-strong);
   letter-spacing: -0.01em;
 }
 
