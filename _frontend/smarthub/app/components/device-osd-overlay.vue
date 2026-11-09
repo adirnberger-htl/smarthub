@@ -2,156 +2,173 @@
   <Transition name="osd-fade">
     <div
       v-if="state.visible && state.mode !== 'IDLE'"
-      class="osd-overlay"
-      :class="{ 'osd-overlay--compact': state.mode === 'TOAST' }"
+      class="osd-backdrop"
       role="status"
       aria-live="polite"
     >
-      <!-- Option B: Compact Single-Row Pill for Quick Toggles / Blind Moves -->
-      <div v-if="state.mode === 'TOAST'" class="osd-pill">
-        <div class="osd-pill__icon">
-          <i :class="headerIcon"></i>
-        </div>
-        <div class="osd-pill__info">
-          <span class="osd-pill__title">{{ headerTitle }}</span>
-          <span v-if="toastKnobHint" class="osd-pill__hint">
-            <i class="fa-solid fa-rotate"></i> {{ toastKnobHint }}
-          </span>
-        </div>
-        <div
-          class="osd-status-indicator"
-          :class="{ 'osd-status-indicator--on': isToastDeviceOn }"
-        >
-          <span class="osd-status-dot"></span>
-          <span>{{ state.toastSubtitle }}</span>
-        </div>
-      </div>
-
-      <!-- Expanded Widget Card for Interactive Rotary Knob Modes -->
-      <div v-else class="osd-card">
-        <div class="osd-header">
-          <div class="osd-icon-badge" :style="iconBadgeStyle">
-            <i :class="headerIcon"></i>
-          </div>
-          <div class="osd-titles">
-            <div class="osd-title">{{ headerTitle }}</div>
-            <div class="osd-subtitle">{{ headerSubtitle }}</div>
-          </div>
-          <div v-if="modeStepBadge" class="osd-step-pill">
-            {{ modeStepBadge }}
-          </div>
-        </div>
-
-        <!-- 1. RGB Color Mode (All Lights or Individual Light) -->
-        <div
-          v-if="state.mode === 'ALL_RGB' || state.mode === 'DEVICE_RGB'"
-          class="osd-body"
-        >
-          <div class="osd-rgb-row">
-            <div
-              class="osd-color-swatch"
-              :style="{
-                backgroundColor: state.ledHex,
-                boxShadow: `0 0 18px ${state.ledHex}66`,
-              }"
-            ></div>
-            <div class="osd-spectrum-wrap">
-              <div class="osd-spectrum-bar">
-                <div
-                  class="osd-spectrum-thumb"
-                  :style="{
-                    left: `${(state.ledHue / 360) * 100}%`,
-                    borderColor: state.ledHex,
-                  }"
-                ></div>
+      <div class="osd-hud" :class="{ 'osd-hud--toast': state.mode === 'TOAST' }">
+        <div class="osd-hud__shell">
+          <!-- Main Content Area -->
+          <div class="osd-main">
+            <!-- Header Row -->
+            <div class="osd-header">
+              <div class="osd-icon-badge" :style="iconBadgeStyle">
+                <i :class="headerIcon"></i>
               </div>
-              <div class="osd-meta-row">
-                <span>Hue: {{ state.ledHue }}°</span>
-                <span class="osd-mono">{{ state.ledHex.toUpperCase() }}</span>
+              <div class="osd-titles">
+                <div class="osd-eyebrow">{{ headerEyebrow }}</div>
+                <div class="osd-title">{{ headerTitle }}</div>
               </div>
-            </div>
-          </div>
-          <div class="osd-hint">
-            <span><i class="fa-solid fa-rotate"></i> Turn knob to change color</span>
-            <span>
-              <i class="fa-solid fa-sliders"></i>
-              {{
-                state.mode === 'ALL_RGB'
-                  ? 'Press Button 2 for All Brightness'
-                  : 'Press light button for Brightness'
-              }}
-            </span>
-          </div>
-        </div>
 
-        <!-- 2. Brightness Mode (All Lights or Individual Light) -->
-        <div
-          v-else-if="
-            state.mode === 'ALL_BRIGHTNESS' || state.mode === 'DEVICE_BRIGHTNESS'
-          "
-          class="osd-body"
-        >
-          <div class="osd-progress-header">
-            <span>Brightness</span>
-            <span class="osd-value-large">{{ activeBrightness }}%</span>
-          </div>
-          <div class="osd-progress-track">
-            <div
-              class="osd-progress-fill"
-              :style="{
-                width: `${activeBrightness}%`,
-                background: brightnessFillGradient,
-              }"
-            ></div>
-          </div>
-          <div class="osd-hint">
-            <span><i class="fa-solid fa-rotate"></i> Turn knob to dim (0–100%)</span>
-            <span>
-              <i class="fa-solid fa-check"></i>
-              {{
-                state.mode === 'ALL_BRIGHTNESS'
-                  ? 'Press Button 2 to Finish'
-                  : 'Press light button to Finish'
-              }}
-            </span>
-          </div>
-        </div>
-
-        <!-- 3. Window Blind Slat Angle Mode -->
-        <div v-else-if="state.mode === 'BLIND_ANGLE'" class="osd-body">
-          <div class="osd-blind-layout">
-            <div class="osd-blind-window" aria-label="Window blind slat angle preview">
+              <!-- Status Pill in TOAST Mode -->
               <div
-                v-for="idx in 6"
-                :key="idx"
-                class="osd-blind-slat"
-                :style="{
-                  transform: `perspective(220px) rotateX(${slatTiltDegrees}deg)`,
+                v-if="state.mode === 'TOAST'"
+                class="osd-status-indicator"
+                :class="{
+                  'osd-status-indicator--on': isToastPositive,
+                  'osd-status-indicator--scene': state.toastKind !== 'device',
                 }"
               >
-                <span class="osd-blind-slat-edge"></span>
+                <span class="osd-status-dot"></span>
+                <span>{{ state.toastSubtitle }}</span>
+              </div>
+
+              <!-- Large Value Readout in Knob Config Slots -->
+              <div v-else class="osd-metric-readout">
+                <span class="osd-value-large">{{ activeMetricPrimary }}</span>
+                <span v-if="activeMetricSecondary" class="osd-value-sub">
+                  {{ activeMetricSecondary }}
+                </span>
               </div>
             </div>
-            <div class="osd-blind-metrics">
-              <div class="osd-value-large">{{ slatTiltDegrees }}°</div>
-              <div class="osd-subtitle">{{ state.blindAngle }}% Slat Tilt</div>
-              <div class="osd-progress-track osd-progress-track--compact">
+
+            <!-- 0. TOAST Body: Smart Light Scene Memory Chips or Quick State -->
+            <div
+              v-if="state.mode === 'TOAST' && state.sceneChips.length > 0"
+              class="osd-scene-grid"
+            >
+              <div
+                v-for="chip in state.sceneChips"
+                :key="chip.id"
+                class="osd-scene-chip"
+                :class="{ 'osd-scene-chip--active': chip.active }"
+              >
+                <span
+                  class="osd-scene-chip__dot"
+                  :style="chip.color && chip.active ? { background: chip.color, boxShadow: `0 0 8px ${chip.color}` } : {}"
+                ></span>
+                <div class="osd-scene-chip__text">
+                  <span class="osd-scene-chip__label">{{ chip.label }}</span>
+                  <span class="osd-scene-chip__status">{{ chip.statusText }}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 1. Blind Slat Angle Mode (3D Three.js Simulation) -->
+            <div v-else-if="state.mode === 'blind_angle'" class="osd-body">
+              <Blind3dViewport
+                :slat-angle-percent="state.blindAngle"
+                :environment="state.environment"
+              />
+              <div class="osd-progress-track osd-progress-track--slim">
                 <div
                   class="osd-progress-fill osd-progress-fill--blind"
                   :style="{ width: `${state.blindAngle}%` }"
                 ></div>
               </div>
-              <div class="osd-slat-labels">
+              <div class="osd-scale-labels">
                 <span>0° Open</span>
                 <span>45° Half</span>
                 <span>90° Closed</span>
               </div>
             </div>
+
+            <!-- 2. LED Strip RGB Color Mode -->
+            <div v-else-if="state.mode === 'led_rgb'" class="osd-body">
+              <div class="osd-rgb-row">
+                <div
+                  class="osd-color-swatch"
+                  :style="{
+                    backgroundColor: state.ledHex,
+                    boxShadow: `0 0 28px ${state.ledHex}77`,
+                  }"
+                ></div>
+                <div class="osd-spectrum-wrap">
+                  <div class="osd-spectrum-bar">
+                    <div
+                      class="osd-spectrum-thumb"
+                      :style="{
+                        left: `${(state.ledHue / 360) * 100}%`,
+                        borderColor: state.ledHex,
+                      }"
+                    ></div>
+                  </div>
+                  <div class="osd-scale-labels">
+                    <span>0° Red</span>
+                    <span>120° Green</span>
+                    <span>240° Blue</span>
+                    <span>360°</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 3. Brightness Mode (Desk Light or LED Strip) -->
+            <div
+              v-else-if="
+                state.mode === 'desk_brightness' || state.mode === 'led_brightness'
+              "
+              class="osd-body"
+            >
+              <div class="osd-progress-track">
+                <div
+                  class="osd-progress-fill"
+                  :style="{
+                    width: `${activeBrightness}%`,
+                    background: brightnessFillGradient,
+                  }"
+                ></div>
+              </div>
+              <div class="osd-scale-labels">
+                <span>0% Off</span>
+                <span>50%</span>
+                <span>100% Max</span>
+              </div>
+            </div>
           </div>
-          <div class="osd-hint">
-            <span><i class="fa-solid fa-rotate"></i> Turn knob to tilt blind slats</span>
-            <span><i class="fa-solid fa-check"></i> Press Blind button to Finish</span>
+
+          <!-- Subtle Vertical 4-Segment Side Progress Rail (Knob Click Cycle) -->
+          <!-- Only rendered when cycling knob configuration slots; hidden during pure button toasts -->
+          <div
+            v-if="state.mode !== 'TOAST'"
+            class="osd-side-rail"
+            aria-label="Knob configuration slot progress rail"
+          >
+            <div
+              v-for="(slotKey, idx) in state.slotOrder"
+              :key="slotKey"
+              class="osd-rail-step"
+              :class="{
+                'osd-rail-step--active': state.activeSlotIndex === idx,
+                'osd-rail-step--passed': idx < state.activeSlotIndex,
+              }"
+            >
+              <div class="osd-rail-bar"></div>
+              <div class="osd-rail-meta">
+                <i :class="KNOB_SLOT_METADATA[slotKey].icon"></i>
+                <span>{{ KNOB_SLOT_METADATA[slotKey].shortLabel }}</span>
+              </div>
+            </div>
           </div>
+        </div>
+
+        <!-- Bottom Smooth Countdown Progress Bar -->
+        <div class="osd-timer-track">
+          <div
+            :key="state.timerRevision"
+            class="osd-timer-bar"
+            :class="{ 'osd-timer-bar--animating': state.isCountingDown }"
+          ></div>
         </div>
       </div>
     </div>
@@ -160,7 +177,11 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted } from 'vue'
-import { useDeviceOsd } from '../composables/use-device-osd'
+import {
+  useDeviceOsd,
+  KNOB_SLOT_METADATA,
+} from '../composables/use-device-osd'
+import Blind3dViewport from './blind-3d-viewport.vue'
 
 const { state, activeDevice, initDeviceOsd, destroyDeviceOsd } = useDeviceOsd()
 
@@ -173,20 +194,14 @@ onUnmounted(() => {
 })
 
 const activeBrightness = computed(() => {
-  if (state.value.mode === 'ALL_BRIGHTNESS') {
-    return state.value.groupBrightness
-  }
-  if (state.value.activeDeviceId === 'room-leds') {
+  if (state.value.mode === 'led_brightness') {
     return state.value.ledBrightness
   }
   return state.value.deskBrightness
 })
 
 const brightnessFillGradient = computed(() => {
-  if (
-    state.value.mode === 'DEVICE_BRIGHTNESS' &&
-    state.value.activeDeviceId === 'room-leds'
-  ) {
+  if (state.value.mode === 'led_brightness') {
     return `linear-gradient(90deg, ${state.value.ledHex}, var(--color-primary))`
   }
   return 'linear-gradient(90deg, var(--color-primary), #f59e0b)'
@@ -194,7 +209,9 @@ const brightnessFillGradient = computed(() => {
 
 const slatTiltDegrees = computed(() => Math.round((state.value.blindAngle / 100) * 90))
 
-const isToastDeviceOn = computed(() => {
+const isToastPositive = computed(() => {
+  if (state.value.toastKind === 'scene_restored') return true
+  if (state.value.toastKind === 'scene_saved') return false
   const dev = activeDevice.value
   if (!dev) return false
   if (dev.category === 'blind') {
@@ -203,91 +220,65 @@ const isToastDeviceOn = computed(() => {
   return Boolean(dev.state.on)
 })
 
-const toastKnobHint = computed(() => {
-  const dev = activeDevice.value
-  if (!dev) return ''
-  if (dev.category === 'blind' && dev.capabilities.includes('blind_angle')) {
-    return 'Turn knob for Slat Angle'
+const headerIcon = computed(() => {
+  if (state.value.mode !== 'TOAST' && state.value.mode !== 'IDLE') {
+    return KNOB_SLOT_METADATA[state.value.mode].icon
   }
-  if (dev.category === 'light' && dev.state.on) {
-    if (dev.capabilities.includes('rgb')) return 'Turn knob for RGB'
-    if (dev.capabilities.includes('brightness')) return 'Turn knob for Brightness'
-  }
-  return ''
+  return state.value.toastIcon || 'fa-solid fa-bolt'
 })
 
-const headerIcon = computed(() => {
-  switch (state.value.mode) {
-    case 'ALL_RGB':
-    case 'DEVICE_RGB':
-      return 'fa-solid fa-palette'
-    case 'ALL_BRIGHTNESS':
-      return 'fa-solid fa-sun'
-    case 'DEVICE_BRIGHTNESS':
-      return state.value.activeDeviceId === 'desk-light'
-        ? 'fa-solid fa-lamp'
-        : 'fa-solid fa-sun'
-    case 'BLIND_ANGLE':
-      return 'fa-solid fa-bars-staggered'
-    default:
-      return state.value.toastIcon || 'fa-solid fa-bolt'
+const headerEyebrow = computed(() => {
+  if (state.value.mode !== 'TOAST' && state.value.mode !== 'IDLE') {
+    return `SLOT ${state.value.activeSlotIndex + 1} OF ${state.value.slotOrder.length} • ${KNOB_SLOT_METADATA[state.value.mode].label.toUpperCase()}`
   }
+  if (state.value.toastKind === 'scene_saved' || state.value.toastKind === 'scene_restored') {
+    return 'BUTTON 6 • SMART LIGHT SCENE MEMORY'
+  }
+  return 'KZ WEST • HARDWARE CONTROL'
 })
 
 const headerTitle = computed(() => {
   switch (state.value.mode) {
-    case 'ALL_RGB':
-      return 'All Room Lights — RGB Color'
-    case 'ALL_BRIGHTNESS':
-      return 'All Room Lights — Brightness'
-    case 'DEVICE_RGB':
-      return `${activeDevice.value?.name || 'LED Strip KZ West'} — RGB Color`
-    case 'DEVICE_BRIGHTNESS':
-      return `${activeDevice.value?.name || 'Schreibtischlicht Arthur'} — Brightness`
-    case 'BLIND_ANGLE':
-      return 'Alle Jalousien KZ West — Slat Angle'
+    case 'blind_angle':
+      return 'Alle Jalousien KZ West'
+    case 'desk_brightness':
+      return 'Schreibtischlicht Arthur'
+    case 'led_rgb':
+      return 'LED Strip KZ West — Color'
+    case 'led_brightness':
+      return 'LED Strip KZ West — Brightness'
     default:
       return state.value.toastTitle || 'KZ West Smart Control'
   }
 })
 
-const headerSubtitle = computed(() => {
+const activeMetricPrimary = computed(() => {
   switch (state.value.mode) {
-    case 'ALL_RGB':
-      return 'Group Light Config • Step 1 of 2'
-    case 'ALL_BRIGHTNESS':
-      return 'Group Light Config • Step 2 of 2 (LEDs + Desk)'
-    case 'DEVICE_RGB':
-      return 'Individual Light Config • Step 1 of 2'
-    case 'DEVICE_BRIGHTNESS':
-      return activeDevice.value?.capabilities.includes('rgb')
-        ? 'Individual Light Config • Step 2 of 2'
-        : 'Individual Light Config • Brightness'
-    case 'BLIND_ANGLE':
-      return 'Rotary Knob Config • Slat Tilt'
+    case 'blind_angle':
+      return `${slatTiltDegrees.value}°`
+    case 'desk_brightness':
+    case 'led_brightness':
+      return `${activeBrightness.value}%`
+    case 'led_rgb':
+      return `${state.value.ledHue}°`
     default:
-      return 'KZ West Hardware Control'
+      return ''
   }
 })
 
-const modeStepBadge = computed(() => {
+const activeMetricSecondary = computed(() => {
   switch (state.value.mode) {
-    case 'ALL_RGB':
-    case 'DEVICE_RGB':
-      return '1 / 2'
-    case 'ALL_BRIGHTNESS':
-      return '2 / 2'
-    case 'DEVICE_BRIGHTNESS':
-      return activeDevice.value?.capabilities.includes('rgb') ? '2 / 2' : 'DIM'
-    case 'BLIND_ANGLE':
-      return 'SLATS'
+    case 'blind_angle':
+      return `${state.value.blindAngle}% Tilt`
+    case 'led_rgb':
+      return state.value.ledHex.toUpperCase()
     default:
       return ''
   }
 })
 
 const iconBadgeStyle = computed(() => {
-  if (state.value.mode === 'ALL_RGB' || state.value.mode === 'DEVICE_RGB') {
+  if (state.value.mode === 'led_rgb' || state.value.mode === 'led_brightness') {
     return {
       background: `${state.value.ledHex}22`,
       color: state.value.ledHex,
@@ -299,104 +290,64 @@ const iconBadgeStyle = computed(() => {
 </script>
 
 <style scoped>
-.osd-overlay {
+.osd-backdrop {
   position: fixed;
-  bottom: 28px;
+  top: 50%;
   left: 50%;
-  transform: translateX(-50%);
+  transform: translate(-50%, -50%);
   z-index: 10000;
   pointer-events: none;
-  width: min(92vw, 480px);
+  width: min(92vw, 680px);
   font-family: var(--font-sans);
 }
 
-.osd-overlay--compact {
-  width: auto;
-  max-width: min(92vw, 520px);
-}
-
-/* ── Option B: Compact Single-Row Pill (TOAST Mode) ── */
-.osd-pill {
+.osd-hud {
   background: var(--bg-surface);
-  border: 1px solid var(--border-base);
-  border-radius: 999px;
-  padding: 10px 14px 10px 12px;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 26px;
   color: var(--text-primary);
-  box-shadow: var(--shadow-overlay);
-  display: inline-flex;
-  align-items: center;
-  gap: 12px;
+  box-shadow: 0 28px 70px rgba(15, 23, 42, 0.35), 0 6px 20px rgba(15, 23, 42, 0.18);
+  overflow: hidden;
   transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease;
 }
 
-.osd-pill__icon {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  background: var(--bg-primary-light);
-  color: var(--color-primary);
+.osd-hud__shell {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1rem;
-  flex-shrink: 0;
+  align-items: stretch;
+  padding: 28px 24px 26px 30px;
+  gap: 24px;
 }
 
-.osd-pill__info {
-  display: flex;
-  flex-direction: column;
+.osd-hud--toast .osd-hud__shell {
+  padding: 26px 30px;
+}
+
+.osd-main {
+  flex: 1;
   min-width: 0;
-  padding-right: 4px;
-}
-
-.osd-pill__title {
-  font-size: 0.95rem;
-  font-weight: 700;
-  color: var(--text-primary-strong);
-  white-space: nowrap;
-}
-
-.osd-pill__hint {
-  font-size: 0.72rem;
-  font-weight: 500;
-  color: var(--text-muted);
-  white-space: nowrap;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-/* ── Expanded Widget Card (Rotary Knob Modes) ── */
-.osd-card {
-  background: var(--bg-surface);
-  border: 1px solid var(--border-base);
-  border-radius: 16px;
-  padding: 20px 24px;
-  color: var(--text-primary);
-  box-shadow: var(--shadow-overlay);
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease;
+  justify-content: center;
+  gap: 22px;
 }
 
 .osd-header {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 18px;
 }
 
 .osd-icon-badge {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
+  width: 64px;
+  height: 64px;
+  border-radius: 18px;
   background: var(--bg-primary-light);
   border: 1px solid var(--border-base);
   color: var(--color-primary);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.2rem;
+  font-size: 1.65rem;
   flex-shrink: 0;
 }
 
@@ -405,50 +356,62 @@ const iconBadgeStyle = computed(() => {
   min-width: 0;
 }
 
+.osd-eyebrow {
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--color-primary);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
 .osd-title {
-  font-size: 1.05rem;
-  font-weight: 700;
+  font-size: 1.45rem;
+  font-weight: 800;
   color: var(--text-primary-strong);
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.osd-subtitle {
-  font-size: 0.8rem;
-  color: var(--text-muted);
-  margin-top: 2px;
-}
-
-.osd-step-pill {
-  padding: 4px 10px;
-  border-radius: 999px;
-  font-size: 0.75rem;
-  font-weight: 700;
-  background: var(--bg-primary-light);
-  color: var(--color-primary);
-  letter-spacing: 0.04em;
-}
-
-.osd-body {
+.osd-metric-readout {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  align-items: flex-end;
+  flex-shrink: 0;
+}
+
+.osd-value-large {
+  font-size: 2.15rem;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary-strong);
+  letter-spacing: -0.03em;
+}
+
+.osd-value-sub {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
 }
 
 .osd-status-indicator {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
+  gap: 10px;
+  padding: 10px 18px;
   border-radius: 999px;
   background: var(--bg-surface-hover);
   border: 1px solid var(--border-base);
-  font-weight: 600;
-  font-size: 0.85rem;
+  font-weight: 700;
+  font-size: 1.02rem;
   color: var(--text-secondary);
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .osd-status-indicator--on {
@@ -458,27 +421,91 @@ const iconBadgeStyle = computed(() => {
 }
 
 .osd-status-dot {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   background: var(--text-light);
 }
 
 .osd-status-indicator--on .osd-status-dot {
   background: var(--weather-dest-color);
-  box-shadow: 0 0 8px var(--weather-dest-color);
+  box-shadow: 0 0 10px var(--weather-dest-color);
+}
+
+/* ── Smart Light Scene Memory Grid (Button 6) ── */
+.osd-scene-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.osd-scene-chip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--bg-surface-hover);
+  border: 1px solid var(--border-base);
+  opacity: 0.7;
+}
+
+.osd-scene-chip--active {
+  opacity: 1;
+  border-color: var(--border-strong);
+  background: var(--bg-surface-active);
+}
+
+.osd-scene-chip__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--text-light);
+  flex-shrink: 0;
+}
+
+.osd-scene-chip--active .osd-scene-chip__dot {
+  background: var(--color-primary);
+}
+
+.osd-scene-chip__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.osd-scene-chip__label {
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: var(--text-primary-strong);
+}
+
+.osd-scene-chip__status {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Knob Mode Bodies ── */
+.osd-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 
 .osd-rgb-row {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 20px;
 }
 
 .osd-color-swatch {
-  width: 48px;
-  height: 48px;
-  border-radius: 12px;
+  width: 68px;
+  height: 68px;
+  border-radius: 18px;
   border: 2px solid var(--border-strong);
   flex-shrink: 0;
   transition: background-color 0.06s linear, box-shadow 0.06s linear;
@@ -488,12 +515,12 @@ const iconBadgeStyle = computed(() => {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
 }
 
 .osd-spectrum-bar {
   position: relative;
-  height: 14px;
+  height: 22px;
   border-radius: 999px;
   background: linear-gradient(
     90deg,
@@ -505,64 +532,31 @@ const iconBadgeStyle = computed(() => {
     #ff00ff 83%,
     #ff0000 100%
   );
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.25);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.3);
 }
 
 .osd-spectrum-thumb {
   position: absolute;
   top: 50%;
-  width: 20px;
-  height: 20px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   background: #ffffff;
-  border: 3px solid #00ff66;
+  border: 4px solid #00ff66;
   transform: translate(-50%, -50%);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.35);
   transition: left 0.05s linear;
 }
 
-.osd-meta-row {
-  display: flex;
-  justify-content: space-between;
-  font-size: 0.8rem;
-  color: var(--text-secondary);
-  font-weight: 600;
-}
-
-.osd-mono {
-  font-family: var(--font-sans);
-  font-weight: 800;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.02em;
-}
-
-.osd-progress-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  font-size: 0.85rem;
-  color: var(--text-secondary);
-  font-weight: 700;
-}
-
-.osd-value-large {
-  font-size: 1.5rem;
-  font-weight: 800;
-  font-variant-numeric: tabular-nums;
-  color: var(--text-primary-strong);
-  letter-spacing: -0.02em;
-}
-
 .osd-progress-track {
-  height: 12px;
+  height: 20px;
   border-radius: 999px;
   background: var(--border-base);
   overflow: hidden;
 }
 
-.osd-progress-track--compact {
-  height: 10px;
-  margin-top: 6px;
+.osd-progress-track--slim {
+  height: 12px;
 }
 
 .osd-progress-fill {
@@ -575,75 +569,117 @@ const iconBadgeStyle = computed(() => {
   background: linear-gradient(90deg, var(--color-primary), var(--transit-train));
 }
 
-.osd-blind-layout {
+.osd-scale-labels {
   display: flex;
-  align-items: center;
-  gap: 20px;
+  justify-content: space-between;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-muted);
 }
 
-.osd-blind-window {
-  width: 120px;
-  height: 104px;
-  border-radius: 12px;
-  border: 1px solid var(--border-strong);
-  background: var(--blind-window-bg);
-  padding: 8px 10px;
+/* ── Subtle Vertical 4-Segment Side Progress Rail ── */
+.osd-side-rail {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
+  gap: 8px;
+  padding-left: 18px;
+  border-left: 1px solid var(--border-base);
+  width: 76px;
   flex-shrink: 0;
 }
 
-.osd-blind-slat {
-  position: relative;
-  height: 10px;
-  border-radius: 3px;
-  background: var(--blind-slat-bg);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
-  transform-origin: center center;
-  transition: transform 0.05s linear;
-}
-
-.osd-blind-slat-edge {
-  display: block;
-  width: 100%;
-  height: 2px;
-  background: var(--blind-slat-edge);
-}
-
-.osd-blind-metrics {
+.osd-rail-step {
   flex: 1;
   display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  opacity: 0.42;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.osd-rail-step--passed {
+  opacity: 0.68;
+}
+
+.osd-rail-step--active {
+  opacity: 1;
+  transform: translateX(-2px);
+}
+
+.osd-rail-bar {
+  width: 6px;
+  height: 100%;
+  min-height: 20px;
+  border-radius: 999px;
+  background: var(--border-strong);
+  transition: background-color 0.2s ease, box-shadow 0.2s ease, width 0.2s ease;
+}
+
+.osd-rail-step--passed .osd-rail-bar {
+  background: var(--color-primary);
+  opacity: 0.55;
+}
+
+.osd-rail-step--active .osd-rail-bar {
+  width: 8px;
+  background: var(--color-primary);
+  box-shadow: 0 0 12px var(--color-primary);
+}
+
+.osd-rail-meta {
+  display: flex;
   flex-direction: column;
-  gap: 4px;
+  align-items: flex-start;
+  gap: 1px;
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  color: var(--text-secondary);
 }
 
-.osd-slat-labels {
-  display: flex;
-  justify-content: space-between;
-  font-size: 0.72rem;
-  color: var(--text-muted);
-  margin-top: 4px;
+.osd-rail-step--active .osd-rail-meta {
+  color: var(--color-primary);
 }
 
-.osd-hint {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  padding-top: 10px;
-  border-top: 1px solid var(--border-light);
-  font-size: 0.75rem;
-  color: var(--text-muted);
+/* ── Bottom Smooth Countdown Bar ── */
+.osd-timer-track {
+  width: 100%;
+  height: 4px;
+  background: var(--border-light);
+  overflow: hidden;
+}
+
+.osd-timer-bar {
+  width: 100%;
+  height: 100%;
+  background: var(--color-primary);
+  transform-origin: left center;
+  transform: scaleX(1);
+}
+
+.osd-timer-bar--animating {
+  animation: osd-countdown 2.4s linear forwards;
+}
+
+@keyframes osd-countdown {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
 }
 
 .osd-fade-enter-active,
 .osd-fade-leave-active {
-  transition: opacity 0.2s ease, transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: opacity 0.22s ease, transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .osd-fade-enter-from,
 .osd-fade-leave-to {
   opacity: 0;
-  transform: translate(-50%, 14px) scale(0.97);
+  transform: translate(-50%, -46%) scale(0.95);
 }
 </style>

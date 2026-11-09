@@ -46,6 +46,18 @@ export type KnxDeviceWithState =
   | (KnxLightDeviceConfig & { state: KnxLightState })
   | (KnxBlindDeviceConfig & { state: KnxBlindState });
 
+export type WeatherFieldRole =
+  | 'weather_raining'
+  | 'weather_outdoorTemp'
+  | 'weather_sunElevation'
+  | 'weather_sunAzimuth'
+  | 'weather_luxSouth4B'
+  | 'weather_luxWest4B'
+  | 'weather_luxSouth2B'
+  | 'weather_luxWest2B'
+  | 'weather_luxMax4B'
+  | 'weather_solarRadiation';
+
 export interface GaTargetResolution {
   deviceId: string;
   role:
@@ -57,8 +69,22 @@ export interface GaTargetResolution {
     | 'move'
     | 'stepStop'
     | 'posHeight'
-    | 'posSlat';
+    | 'posSlat'
+    | WeatherFieldRole;
   dpt: string;
+}
+
+export interface KnxEnvironmentDTO {
+  sunElevation: number;
+  sunAzimuth: number;
+  luxWest: number;
+  luxSouth: number;
+  luxMax: number;
+  outdoorTemp: number;
+  raining: boolean;
+  solarRadiation: number;
+  source: 'knx' | 'fallback';
+  updatedAt: string | null;
 }
 
 export const KZ_WEST_DEVICES: readonly KnxDeviceConfig[] = [
@@ -118,9 +144,42 @@ export const KZ_WEST_DEVICES: readonly KnxDeviceConfig[] = [
   },
 ];
 
+export const KNX_WEATHER_STATION_GAS: ReadonlyArray<{
+  ga: string;
+  role: WeatherFieldRole;
+  dpt: string;
+}> = [
+  { ga: '0/5/6', role: 'weather_raining', dpt: '1.001' },
+  { ga: '0/5/7', role: 'weather_outdoorTemp', dpt: '9.001' },
+  { ga: '0/5/8', role: 'weather_sunElevation', dpt: '5.004' },
+  { ga: '0/5/12', role: 'weather_sunAzimuth', dpt: '5.003' },
+  { ga: '0/5/13', role: 'weather_luxSouth4B', dpt: '14.027' },
+  { ga: '0/5/14', role: 'weather_luxWest4B', dpt: '14.027' },
+  { ga: '0/5/16', role: 'weather_luxSouth2B', dpt: '9.004' },
+  { ga: '0/5/17', role: 'weather_luxWest2B', dpt: '9.004' },
+  { ga: '0/5/19', role: 'weather_luxMax4B', dpt: '14.027' },
+  { ga: '0/5/26', role: 'weather_solarRadiation', dpt: '9.024' },
+];
+
 const deviceMap = new Map<string, KnxDeviceConfig>();
 const gaLookup = new Map<string, GaTargetResolution[]>();
 const stateStore = new Map<string, KnxDeviceState>();
+
+interface PartialEnvironmentCache {
+  sunElevation?: number;
+  sunAzimuth?: number;
+  luxWest?: number;
+  luxSouth?: number;
+  luxMax?: number;
+  outdoorTemp?: number;
+  raining?: boolean;
+  solarRadiation?: number;
+  updatedAt: string | null;
+}
+
+const environmentCache: PartialEnvironmentCache = {
+  updatedAt: null,
+};
 
 function registerGa(ga: string | undefined, resolution: GaTargetResolution) {
   if (!ga) return;
@@ -155,6 +214,149 @@ for (const device of KZ_WEST_DEVICES) {
     registerGa(device.posHeightGA, { deviceId: device.id, role: 'posHeight', dpt: '7.001' });
     registerGa(device.posSlatGA, { deviceId: device.id, role: 'posSlat', dpt: '7.001' });
   }
+}
+
+for (const w of KNX_WEATHER_STATION_GAS) {
+  registerGa(w.ga, {
+    deviceId: 'weather-station',
+    role: w.role,
+    dpt: w.dpt,
+  });
+}
+
+/**
+ * Compute deterministic astronomical solar elevation, azimuth, and estimated facade Lux
+ * for Linz, Austria (48.3069° N, 14.2858° E) when KNX weather station data has not arrived yet.
+ */
+export function computeAstronomicalFallback(now = new Date()): Omit<KnxEnvironmentDTO, 'source' | 'updatedAt'> {
+  const latDeg = 48.3069;
+  const lonDeg = 14.2858;
+  const rad = Math.PI / 180;
+  const deg = 180 / Math.PI;
+
+  const startOfYear = new Date(Date.UTC(now.getUTCFullYear(), 0, 0));
+  const dayOfYear = Math.floor((now.getTime() - startOfYear.getTime()) / 86400000);
+  const utcHours =
+    now.getUTCHours() + now.getUTCMinutes() / 60 + now.getUTCSeconds() / 3600;
+
+  const gamma = ((2 * Math.PI) / 365) * (dayOfYear - 1 + (utcHours - 12) / 24);
+  const eqTime =
+    229.18 *
+    (0.000075 +
+      0.001868 * Math.cos(gamma) -
+      0.032077 * Math.sin(gamma) -
+      0.014615 * Math.cos(2 * gamma) -
+      0.040849 * Math.sin(2 * gamma));
+
+  const decl =
+    0.006918 -
+    0.399912 * Math.cos(gamma) +
+    0.070257 * Math.sin(gamma) -
+    0.006758 * Math.cos(2 * gamma) +
+    0.000907 * Math.sin(2 * gamma) -
+    0.002697 * Math.cos(3 * gamma) +
+    0.00148 * Math.sin(3 * gamma);
+
+  const trueSolarTimeMin = (utcHours * 60 + eqTime + 4 * lonDeg + 1440) % 1440;
+  const hourAngleDeg = trueSolarTimeMin / 4 < 0 ? trueSolarTimeMin / 4 + 180 : trueSolarTimeMin / 4 - 180;
+  const haRad = hourAngleDeg * rad;
+  const latRad = latDeg * rad;
+
+  const sinElev =
+    Math.sin(latRad) * Math.sin(decl) +
+    Math.cos(latRad) * Math.cos(decl) * Math.cos(haRad);
+  const elevRad = Math.asin(Math.max(-1, Math.min(1, sinElev)));
+  const sunElevation = Math.round(elevRad * deg * 10) / 10;
+
+  const cosZenith = Math.sin(elevRad);
+  const sinZenith = Math.sqrt(Math.max(0.0001, 1 - cosZenith * cosZenith));
+  let cosAz =
+    (Math.sin(latRad) * cosZenith - Math.sin(decl)) /
+    (Math.cos(latRad) * sinZenith);
+  cosAz = Math.max(-1, Math.min(1, cosAz));
+  let azimuth = Math.acos(cosAz) * deg;
+  if (hourAngleDeg > 0) {
+    azimuth = (azimuth + 180) % 360;
+  } else {
+    azimuth = (540 - azimuth) % 360;
+  }
+  const sunAzimuth = Math.round(azimuth * 10) / 10;
+
+  // Estimate realistic outdoor Lux and facade distribution
+  const daylightFactor = Math.max(0, Math.sin(Math.max(0, sunElevation) * rad));
+  const luxMax = sunElevation > 0 ? Math.round(1200 + daylightFactor * 52000) : 15;
+
+  // West facade (270°) & South facade (180°) directional incidence
+  const westIncidence = Math.max(0.15, Math.cos((sunAzimuth - 270) * rad));
+  const southIncidence = Math.max(0.15, Math.cos((sunAzimuth - 180) * rad));
+  const luxWest = sunElevation > 0 ? Math.round(luxMax * (0.25 + 0.75 * westIncidence)) : 10;
+  const luxSouth = sunElevation > 0 ? Math.round(luxMax * (0.25 + 0.75 * southIncidence)) : 10;
+  const solarRadiation = sunElevation > 0 ? Math.round(daylightFactor * 680) : 0;
+
+  return {
+    sunElevation,
+    sunAzimuth,
+    luxWest,
+    luxSouth,
+    luxMax,
+    outdoorTemp: 14.5,
+    raining: false,
+    solarRadiation,
+  };
+}
+
+export function getKnxEnvironmentState(now = new Date()): KnxEnvironmentDTO {
+  const fallback = computeAstronomicalFallback(now);
+  const hasKnxData = environmentCache.updatedAt !== null;
+
+  const luxWest = environmentCache.luxWest ?? fallback.luxWest;
+  const luxSouth = environmentCache.luxSouth ?? fallback.luxSouth;
+  const luxMax =
+    environmentCache.luxMax ?? Math.max(luxWest, luxSouth, fallback.luxMax);
+
+  return {
+    sunElevation: environmentCache.sunElevation ?? fallback.sunElevation,
+    sunAzimuth: environmentCache.sunAzimuth ?? fallback.sunAzimuth,
+    luxWest,
+    luxSouth,
+    luxMax,
+    outdoorTemp: environmentCache.outdoorTemp ?? fallback.outdoorTemp,
+    raining: environmentCache.raining ?? fallback.raining,
+    solarRadiation: environmentCache.solarRadiation ?? fallback.solarRadiation,
+    source: hasKnxData ? 'knx' : 'fallback',
+    updatedAt: environmentCache.updatedAt,
+  };
+}
+
+export function updateKnxEnvironmentState(
+  patch: Partial<Omit<KnxEnvironmentDTO, 'source' | 'updatedAt'>>
+): KnxEnvironmentDTO {
+  if (patch.sunElevation !== undefined && !Number.isNaN(patch.sunElevation)) {
+    environmentCache.sunElevation = Math.max(-90, Math.min(90, Math.round(patch.sunElevation * 10) / 10));
+  }
+  if (patch.sunAzimuth !== undefined && !Number.isNaN(patch.sunAzimuth)) {
+    environmentCache.sunAzimuth = ((Math.round(patch.sunAzimuth * 10) / 10) % 360 + 360) % 360;
+  }
+  if (patch.luxWest !== undefined && !Number.isNaN(patch.luxWest)) {
+    environmentCache.luxWest = Math.max(0, Math.round(patch.luxWest));
+  }
+  if (patch.luxSouth !== undefined && !Number.isNaN(patch.luxSouth)) {
+    environmentCache.luxSouth = Math.max(0, Math.round(patch.luxSouth));
+  }
+  if (patch.luxMax !== undefined && !Number.isNaN(patch.luxMax)) {
+    environmentCache.luxMax = Math.max(0, Math.round(patch.luxMax));
+  }
+  if (patch.outdoorTemp !== undefined && !Number.isNaN(patch.outdoorTemp)) {
+    environmentCache.outdoorTemp = Math.round(patch.outdoorTemp * 10) / 10;
+  }
+  if (patch.raining !== undefined) {
+    environmentCache.raining = Boolean(patch.raining);
+  }
+  if (patch.solarRadiation !== undefined && !Number.isNaN(patch.solarRadiation)) {
+    environmentCache.solarRadiation = Math.max(0, Math.round(patch.solarRadiation));
+  }
+  environmentCache.updatedAt = new Date().toISOString();
+  return getKnxEnvironmentState();
 }
 
 export function listKnxDevices(): KnxDeviceWithState[] {
@@ -209,6 +411,14 @@ export function getStartupReadGroupAddresses(): Array<{ ga: string; dpt: string 
       }
     }
   }
+
+  for (const w of KNX_WEATHER_STATION_GAS) {
+    if (!seen.has(w.ga)) {
+      seen.add(w.ga);
+      result.push({ ga: w.ga, dpt: w.dpt });
+    }
+  }
+
   return result;
 }
 

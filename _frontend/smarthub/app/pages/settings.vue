@@ -4,7 +4,12 @@ import { useRouter, useRoute } from 'vue-router'
 import { useRuntimeConfig } from '#app'
 import { useSettings } from '../composables/use-settings.js'
 import { useSmarthubApi } from '../composables/use-smarthub-api.js'
-import { useDeviceOsd, OSD_ACTION_METADATA, type OsdHardwareAction } from '../composables/use-device-osd'
+import {
+  useDeviceOsd,
+  OSD_ACTION_METADATA,
+  KNOB_SLOT_METADATA,
+  type OsdHardwareAction,
+} from '../composables/use-device-osd'
 import DatePickerPopup from '../components/date-picker-popup.vue'
 import AddressAutocomplete from '../components/address-autocomplete.vue'
 
@@ -17,7 +22,15 @@ const route = useRoute()
 
 const { state, getGlobalSettings, addRoutineItem, updateRoutineItem, removeRoutineItem, setPreview, saveGlobalSettings } = useSettings()
 const { geocodePlace, get, fetchMe, logout } = useSmarthubApi()
-const { state: osdState, startLearningKey, cancelLearningKey, resetKeymapToDefaults, triggerAction: triggerOsdAction } = useDeviceOsd()
+const {
+  state: osdState,
+  startLearningKey,
+  cancelLearningKey,
+  resetKeymapToDefaults,
+  moveKnobSlot,
+  enterSlotByIndex,
+  triggerAction: triggerOsdAction,
+} = useDeviceOsd()
 
 function toggleLearnAction(action: OsdHardwareAction) {
   if (osdState.value.learningAction === action) {
@@ -513,7 +526,7 @@ onMounted(async () => {
         <div class="routine-card">
           <div class="routine-card__body" style="padding: 16px 20px; display: flex; flex-direction: column; gap: 12px;">
             <p class="helper-text" style="margin: 0 0 4px 0;">
-              Click a key badge below, then press one of the 6 buttons or turn the rotary knob on your USB keypad to bind it. Double-press light or blind buttons (or click <b>Test</b> twice quickly) to jump straight to RGB, Brightness, or Slat Angle config. Press <b>Esc</b> to cancel learning.
+              Click a key badge below, then press one of the 6 buttons or click/turn the rotary knob on your USB keypad to bind it. All 6 buttons execute immediately (`0ms`). Press <b>Esc</b> to cancel learning.
             </p>
 
             <div
@@ -563,6 +576,75 @@ onMounted(async () => {
                       ? 'Press key / knob...'
                       : osdState.keymap[meta.action]
                   }}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="routines-section-header" style="margin-top: 16px;">
+          <h3><i class="fa-solid fa-list-ol" style="color: var(--color-primary); margin-right: 8px;"></i>Rotary Knob Click Cycle Order (Slots 1–4)</h3>
+        </div>
+
+        <div class="routine-card">
+          <div class="routine-card__body" style="padding: 16px 20px; display: flex; flex-direction: column; gap: 12px;">
+            <p class="helper-text" style="margin: 0 0 4px 0;">
+              Configure the order of the 4 rotary knob modes when clicking the knob (`1st click → 2nd click → 3rd click → 4th click → 5th click closes`). This order is also shown on the vertical progress rail on the right side of the HUD.
+            </p>
+
+            <div
+              v-for="(slotKey, idx) in osdState.slotOrder"
+              :key="slotKey"
+              class="routine-card__row"
+              :style="{
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                paddingTop: idx > 0 ? '12px' : '0',
+                borderTop: idx > 0 ? '1px solid var(--border-light)' : 'none',
+              }"
+            >
+              <div class="routine-card__field" style="flex: 1; padding-right: 12px;">
+                <label class="field-label" style="font-size: 0.92rem; color: var(--text-primary-strong); margin: 0; text-transform: none; letter-spacing: normal; display: flex; align-items: center; gap: 8px;">
+                  <span
+                    style="display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 999px; background: var(--bg-primary-light); color: var(--color-primary); font-size: 0.78rem; font-weight: 800;"
+                  >
+                    {{ idx + 1 }}
+                  </span>
+                  <i :class="KNOB_SLOT_METADATA[slotKey].icon" style="color: var(--color-primary); width: 16px; text-align: center;"></i>
+                  {{ KNOB_SLOT_METADATA[slotKey].label }}
+                </label>
+                <p class="helper-text" style="margin: 2px 0 0 54px;">{{ KNOB_SLOT_METADATA[slotKey].description }}</p>
+              </div>
+
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <button
+                  type="button"
+                  class="segment-btn"
+                  style="padding: 6px 10px; font-size: 0.8rem;"
+                  title="Preview this slot in the center HUD"
+                  @click="enterSlotByIndex(idx)"
+                >
+                  Preview
+                </button>
+                <button
+                  type="button"
+                  class="segment-btn"
+                  style="padding: 6px 10px; font-size: 0.8rem;"
+                  :disabled="idx === 0"
+                  title="Move slot up"
+                  @click="moveKnobSlot(idx, -1)"
+                >
+                  <i class="fa-solid fa-arrow-up"></i>
+                </button>
+                <button
+                  type="button"
+                  class="segment-btn"
+                  style="padding: 6px 10px; font-size: 0.8rem;"
+                  :disabled="idx === osdState.slotOrder.length - 1"
+                  title="Move slot down"
+                  @click="moveKnobSlot(idx, 1)"
+                >
+                  <i class="fa-solid fa-arrow-down"></i>
                 </button>
               </div>
             </div>
