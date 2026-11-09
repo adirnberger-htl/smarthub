@@ -43,6 +43,19 @@ export interface DeviceCommandDTO {
   slatAngle?: number
 }
 
+export interface KnxEnvironmentDTO {
+  sunElevation: number
+  sunAzimuth: number
+  luxWest: number
+  luxSouth: number
+  luxMax: number
+  outdoorTemp: number
+  raining: boolean
+  solarRadiation: number
+  source: 'knx' | 'fallback'
+  updatedAt: string | null
+}
+
 interface ServiceStatusResponse {
   status: 'ok' | 'loading' | 'error'
   backend: string
@@ -177,8 +190,8 @@ export function useSmarthubApi() {
     return request<any>('DELETE', `/api/routines/${id}`, {})
   }
 
-  const fetchDevices = async (): Promise<{ devices: SmartDeviceDTO[] }> => {
-    return request<{ devices: SmartDeviceDTO[] }>('GET', '/api/devices', {})
+  const fetchDevices = async (): Promise<{ devices: SmartDeviceDTO[]; environment?: KnxEnvironmentDTO }> => {
+    return request<{ devices: SmartDeviceDTO[]; environment?: KnxEnvironmentDTO }>('GET', '/api/devices', {})
   }
 
   const sendDeviceCommand = async (id: string, cmd: DeviceCommandDTO): Promise<SmartDeviceDTO> => {

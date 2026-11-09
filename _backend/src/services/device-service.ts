@@ -3,6 +3,8 @@ import {
   DeviceCommandDTO,
   getDeviceDefinition,
   getSmartDevice,
+  getSmartEnvironment,
+  KnxEnvironmentDTO,
   listSmartDevices,
   SmartDeviceDTO,
   toSmartDeviceFromKnx,
@@ -45,10 +47,18 @@ export class DeviceService extends EventEmitter {
         this.emit('device-state', normalized);
       }
     });
+
+    globalKnxService.on('knx-environment', (env: KnxEnvironmentDTO) => {
+      this.emit('environment-state', env);
+    });
   }
 
   public listDevices(): SmartDeviceDTO[] {
     return listSmartDevices();
+  }
+
+  public getEnvironment(): KnxEnvironmentDTO {
+    return getSmartEnvironment();
   }
 
   public getDevice(id: string): SmartDeviceDTO | undefined {

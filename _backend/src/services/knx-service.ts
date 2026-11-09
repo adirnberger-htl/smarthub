@@ -3,11 +3,14 @@ import { KNXClient, KNXClientEvents, dptlib } from 'knxultimate';
 import {
   getKnxDevice,
   getKnxDeviceWithState,
+  getKnxEnvironmentState,
   getStartupReadGroupAddresses,
   KnxDeviceWithState,
+  KnxEnvironmentDTO,
   listKnxDevices,
   resolveGroupAddress,
   updateBlindState,
+  updateKnxEnvironmentState,
   updateLightState,
 } from '../repo/knx-repo.js';
 
@@ -111,6 +114,7 @@ export class KnxService extends EventEmitter {
       port: Number(process.env.KNX_PORT || 3671),
       physAddr: process.env.KNX_PHYS_ADDR || '1.2.6',
       devices: listKnxDevices(),
+      environment: getKnxEnvironmentState(),
     };
   }
 
@@ -236,8 +240,101 @@ export class KnxService extends EventEmitter {
             : { slatPos: percent, rawSlatPos: raw }
         );
         if (updated) this.emitStateUpdate(updated);
+      } else if (res.role.startsWith('weather_')) {
+        this.handleWeatherTelegram(res.role, rawBuffer);
       }
     }
+  }
+
+  private handleWeatherTelegram(role: string, rawBuffer: Buffer): void {
+    let env: KnxEnvironmentDTO | null = null;
+
+    if (role === 'weather_raining') {
+      const raining = Boolean(dptlib.fromBuffer(rawBuffer, dptlib.resolve('1.001')));
+      env = updateKnxEnvironmentState({ raining });
+    } else if (role === 'weather_outdoorTemp') {
+      const temp = this.decodeFloatValue(rawBuffer, '9.001');
+      if (temp !== null) {
+        env = updateKnxEnvironmentState({ outdoorTemp: temp });
+      }
+    } else if (role === 'weather_sunElevation') {
+      const elev = this.decodeSunElevation(rawBuffer);
+      if (elev !== null) {
+        env = updateKnxEnvironmentState({ sunElevation: elev });
+      }
+    } else if (role === 'weather_sunAzimuth') {
+      const az = this.decodeSunAzimuth(rawBuffer);
+      if (az !== null) {
+        env = updateKnxEnvironmentState({ sunAzimuth: az });
+      }
+    } else if (role === 'weather_luxSouth4B' || role === 'weather_luxSouth2B') {
+      const lux = this.decodeFloatValue(rawBuffer, role.endsWith('4B') ? '14.027' : '9.004');
+      if (lux !== null) {
+        env = updateKnxEnvironmentState({ luxSouth: lux });
+      }
+    } else if (role === 'weather_luxWest4B' || role === 'weather_luxWest2B') {
+      const lux = this.decodeFloatValue(rawBuffer, role.endsWith('4B') ? '14.027' : '9.004');
+      if (lux !== null) {
+        env = updateKnxEnvironmentState({ luxWest: lux });
+      }
+    } else if (role === 'weather_luxMax4B') {
+      const lux = this.decodeFloatValue(rawBuffer, '14.027');
+      if (lux !== null) {
+        env = updateKnxEnvironmentState({ luxMax: lux });
+      }
+    } else if (role === 'weather_solarRadiation') {
+      const rad = this.decodeFloatValue(rawBuffer, '9.024');
+      if (rad !== null) {
+        env = updateKnxEnvironmentState({ solarRadiation: rad });
+      }
+    }
+
+    if (env) {
+      this.emit('knx-environment', env);
+    }
+  }
+
+  private decodeSunElevation(buf: Buffer): number | null {
+    if (buf.length === 1) {
+      const signed = buf.readInt8(0);
+      if (signed >= -90 && signed <= 90) {
+        return signed;
+      }
+      const unsigned = buf.readUInt8(0);
+      return Math.round(((unsigned / 255) * 90) * 10) / 10;
+    }
+    return this.decodeFloatValue(buf, '9.001');
+  }
+
+  private decodeSunAzimuth(buf: Buffer): number | null {
+    if (buf.length === 1) {
+      const unsigned = buf.readUInt8(0);
+      // Standard KNX 1-byte angle DPT 5.003 scales 0..255 -> 0..360°
+      return Math.round(((unsigned * 360) / 255) * 10) / 10;
+    }
+    return this.decodeFloatValue(buf, '9.001');
+  }
+
+  private decodeFloatValue(buf: Buffer, preferredDpt: string): number | null {
+    try {
+      if (buf.length === 4) {
+        const f32 = buf.readFloatBE(0);
+        if (Number.isFinite(f32) && Math.abs(f32) < 500000) {
+          return f32;
+        }
+        return buf.readUInt32BE(0);
+      }
+      if (buf.length === 2) {
+        const val = Number(dptlib.fromBuffer(buf, dptlib.resolve(preferredDpt)));
+        if (Number.isFinite(val)) return val;
+      }
+      if (buf.length === 1) {
+        return buf.readUInt8(0);
+      }
+    } catch {
+      // Fall through to null
+    }
+    return null;
   }
 
   private decodeTwoBytePosition(buf: Buffer): { raw: number; percent: number } {

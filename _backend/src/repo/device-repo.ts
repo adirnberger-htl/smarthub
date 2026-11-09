@@ -1,12 +1,16 @@
 import {
   getKnxDeviceWithState,
+  getKnxEnvironmentState,
   KnxBlindDeviceConfig,
   KnxBlindState,
   KnxDeviceWithState,
+  KnxEnvironmentDTO,
   KnxLightDeviceConfig,
   KnxLightState,
 } from './knx-repo.js';
 import { BlindAction } from '../services/knx-service.js';
+
+export type { KnxEnvironmentDTO };
 
 export type DeviceCategory = 'light' | 'outlet' | 'blind';
 
@@ -209,6 +213,10 @@ export function getSmartDevice(id: string): SmartDeviceDTO | undefined {
 
 export function listSmartDevices(): SmartDeviceDTO[] {
   return KZ_WEST_SMART_DEVICES.map((d) => getSmartDevice(d.id)!);
+}
+
+export function getSmartEnvironment(): KnxEnvironmentDTO {
+  return getKnxEnvironmentState();
 }
 
 export function updateCustomDeviceState(

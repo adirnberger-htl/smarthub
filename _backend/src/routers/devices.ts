@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { requireAuth, AuthenticatedRequest } from '../middleware/auth.js';
-import { DeviceCommandDTO, SmartDeviceDTO } from '../repo/device-repo.js';
+import { DeviceCommandDTO, KnxEnvironmentDTO, SmartDeviceDTO } from '../repo/device-repo.js';
 import {
   DeviceNotFoundError,
   DeviceValidationError,
@@ -16,6 +16,7 @@ router.get('/api/devices', requireAuth, (req: AuthenticatedRequest, res: Respons
 
   return res.json({
     devices: globalDeviceService.listDevices(),
+    environment: globalDeviceService.getEnvironment(),
   });
 });
 
@@ -32,12 +33,20 @@ router.get('/api/devices/events', requireAuth, (req: AuthenticatedRequest, res: 
   res.write(
     `event: device-snapshot\ndata: ${JSON.stringify(globalDeviceService.listDevices())}\n\n`
   );
+  res.write(
+    `event: environment-state\ndata: ${JSON.stringify(globalDeviceService.getEnvironment())}\n\n`
+  );
 
   const onState = (device: SmartDeviceDTO) => {
     res.write(`event: device-state\ndata: ${JSON.stringify(device)}\n\n`);
   };
 
+  const onEnv = (env: KnxEnvironmentDTO) => {
+    res.write(`event: environment-state\ndata: ${JSON.stringify(env)}\n\n`);
+  };
+
   globalDeviceService.on('device-state', onState);
+  globalDeviceService.on('environment-state', onEnv);
 
   const heartbeat = setInterval(() => {
     res.write(': keep-alive\n\n');
@@ -46,6 +55,7 @@ router.get('/api/devices/events', requireAuth, (req: AuthenticatedRequest, res: 
   req.on('close', () => {
     clearInterval(heartbeat);
     globalDeviceService.off('device-state', onState);
+    globalDeviceService.off('environment-state', onEnv);
   });
 });
 

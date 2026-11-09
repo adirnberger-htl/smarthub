@@ -66,6 +66,22 @@ export class CSARouter {
   private serviceIdToIdx = new Map<string, number>();
   private footpathsByStopIdx: IndexedFootpath[][] = [];
 
+  // Compact TypedArray columns for Stops and Trips
+  private stopLat = new Float64Array(0);
+  private stopLon = new Float64Array(0);
+  private tripServiceIdx = new Int32Array(0);
+
+  // Pre-allocated scratch buffers for zero-allocation query execution
+  private scratchTime = new Int32Array(0);
+  private scratchTransfers = new Int32Array(0);
+  private scratchStartWalk = new Int32Array(0);
+  private scratchEndWalk = new Int32Array(0);
+  private scratchTripConn = new Int32Array(0);
+  private scratchEdgeConn = new Int32Array(0);
+  private scratchFpStop = new Int32Array(0);
+  private scratchFpWalk = new Int32Array(0);
+  private scratchFpTime = new Int32Array(0);
+
   // Compact TypedArray columns for forward connections (sorted ascending by departure_time)
   private numConnections = 0;
   private fwdDepStop = new Int32Array(0);
@@ -240,6 +256,7 @@ export class CSARouter {
       this.bwdArrTime = i32.subarray(8 * n, 9 * n);
       this.bwdTripIdx = i32.subarray(9 * n, 10 * n);
 
+      this.initAuxTypedArrays();
       this.activeServiceCache.clear();
       this.ready = true;
       console.timeEnd('[CSA] Load from disk cache');
@@ -412,6 +429,34 @@ export class CSARouter {
       this.bwdArrTime[i] = rawArrTime[idx];
       this.bwdTripIdx[i] = rawTripIdx[idx];
     }
+  }
+
+  private initAuxTypedArrays(): void {
+    const numStops = this.stopList.length;
+    const numTrips = this.tripList.length;
+
+    this.stopLat = new Float64Array(numStops);
+    this.stopLon = new Float64Array(numStops);
+    for (let i = 0; i < numStops; i++) {
+      const s = this.stopList[i];
+      this.stopLat[i] = s.lat;
+      this.stopLon[i] = s.lon;
+    }
+
+    this.tripServiceIdx = new Int32Array(numTrips);
+    for (let i = 0; i < numTrips; i++) {
+      this.tripServiceIdx[i] = this.tripList[i].serviceIdx;
+    }
+
+    this.scratchTime = new Int32Array(numStops);
+    this.scratchTransfers = new Int32Array(numStops);
+    this.scratchStartWalk = new Int32Array(numStops);
+    this.scratchEndWalk = new Int32Array(numStops);
+    this.scratchTripConn = new Int32Array(numTrips);
+    this.scratchEdgeConn = new Int32Array(numStops);
+    this.scratchFpStop = new Int32Array(numStops);
+    this.scratchFpWalk = new Int32Array(numStops);
+    this.scratchFpTime = new Int32Array(numStops);
   }
 
   public async loadFromGTFSFiles(dataDir: string): Promise<boolean> {
@@ -598,6 +643,7 @@ export class CSARouter {
 
     this.computeFootpaths();
     this.buildTypedConnectionColumns(rawDepStop, rawArrStop, rawDepTime, rawArrTime, rawTripIdx);
+    this.initAuxTypedArrays();
 
     this.activeServiceCache.clear();
     this.ready = true;
@@ -713,27 +759,46 @@ export class CSARouter {
 
     const results: Array<{ stop: StopData; walkTime: number }> = [];
     const n = this.stopList.length;
+    const stopLat = this.stopLat;
+    const stopLon = this.stopLon;
 
     for (let i = 0; i < n; i++) {
-      const stop = this.stopList[i];
-      if (Math.abs(stop.lat - lat) > latDelta || Math.abs(stop.lon - lon) > lonDelta) {
-        continue;
-      }
-      const dist = this.getDistanceMeters(lat, lon, stop.lat, stop.lon);
+      const sLat = stopLat[i];
+      if (Math.abs(sLat - lat) > latDelta) continue;
+      const sLon = stopLon[i];
+      if (Math.abs(sLon - lon) > lonDelta) continue;
+
+      const dist = this.getDistanceMeters(lat, lon, sLat, sLon);
       if (dist <= maxMeters) {
-        results.push({ stop, walkTime: Math.round(dist / WALK_SPEED_M_S) });
+        results.push({ stop: this.stopList[i], walkTime: Math.round(dist / WALK_SPEED_M_S) });
       }
     }
 
     if (results.length === 0 && n > 0) {
+      // Equirectangular squared-distance pre-filter before exact Haversine on closest candidates
+      const cosLat = Math.cos(lat * Math.PI / 180);
+      let minSq = Infinity;
+      for (let i = 0; i < n; i++) {
+        const dLat = stopLat[i] - lat;
+        const dLon = (stopLon[i] - lon) * cosLat;
+        const sq = dLat * dLat + dLon * dLon;
+        if (sq < minSq) {
+          minSq = sq;
+        }
+      }
+
+      const thresholdSq = minSq * 1.05 + 1e-9;
       let nearest: StopData | null = null;
       let minDist = Infinity;
       for (let i = 0; i < n; i++) {
-        const stop = this.stopList[i];
-        const dist = this.getDistanceMeters(lat, lon, stop.lat, stop.lon);
-        if (dist < minDist) {
-          minDist = dist;
-          nearest = stop;
+        const dLat = stopLat[i] - lat;
+        const dLon = (stopLon[i] - lon) * cosLat;
+        if (dLat * dLat + dLon * dLon <= thresholdSq) {
+          const dist = this.getDistanceMeters(lat, lon, stopLat[i], stopLon[i]);
+          if (dist < minDist) {
+            minDist = dist;
+            nearest = this.stopList[i];
+          }
         }
       }
       if (nearest) {
@@ -798,18 +863,24 @@ export class CSARouter {
       return [];
     }
 
-    const numStops = this.stopList.length;
-    const numTrips = this.tripList.length;
     const activeService = this.getActiveServiceMask(targetDate);
 
-    const earliestArrivalTime = new Int32Array(numStops).fill(INF);
-    const earliestArrivalTransfers = new Int32Array(numStops).fill(INF);
-    const walkToStart = new Int32Array(numStops).fill(-1);
-    const endStopWalk = new Int32Array(numStops).fill(-1);
-    const tripBoardStop = new Int32Array(numTrips).fill(-1);
+    const earliestArrivalTime = this.scratchTime;
+    const earliestArrivalTransfers = this.scratchTransfers;
+    const walkToStart = this.scratchStartWalk;
+    const endStopWalk = this.scratchEndWalk;
+    const tripBoardConn = this.scratchTripConn;
+    const inEdgeConn = this.scratchEdgeConn;
+    const inFpFrom = this.scratchFpStop;
+    const inFpWalk = this.scratchFpWalk;
+    const inFpTime = this.scratchFpTime;
 
-    const inConnection = new Map<number, any>();
-    const tripPrevConnection = new Map<number, number>(); // key: tripIdx * numStops + arrStopIdx -> connIdx
+    earliestArrivalTime.fill(INF);
+    earliestArrivalTransfers.fill(INF);
+    walkToStart.fill(-1);
+    endStopWalk.fill(-1);
+    tripBoardConn.fill(-1);
+    inEdgeConn.fill(-1);
 
     for (let i = 0; i < endStops.length; i++) {
       const { stop, walkTime } = endStops[i];
@@ -845,7 +916,7 @@ export class CSARouter {
     const fwdDepTime = this.fwdDepTime;
     const fwdArrTime = this.fwdArrTime;
     const fwdTripIdx = this.fwdTripIdx;
-    const tripList = this.tripList;
+    const tripServiceIdx = this.tripServiceIdx;
     const footpathsByStopIdx = this.footpathsByStopIdx;
 
     for (let i = startIdx; i < n; i++) {
@@ -855,21 +926,19 @@ export class CSARouter {
       }
 
       const tripIdx = fwdTripIdx[i];
-      if (activeService[tripList[tripIdx].serviceIdx] === 0) {
+      if (activeService[tripServiceIdx[tripIdx]] === 0) {
         continue;
       }
 
       const depStopIdx = fwdDepStop[i];
       const depArrTime = earliestArrivalTime[depStopIdx];
-      const wasReached = tripBoardStop[tripIdx] !== -1;
+      const wasReached = tripBoardConn[tripIdx] !== -1;
 
       if (depArrTime <= depTime || wasReached) {
         if (!wasReached) {
-          tripBoardStop[tripIdx] = depStopIdx;
+          tripBoardConn[tripIdx] = i;
         }
         const arrStopIdx = fwdArrStop[i];
-        tripPrevConnection.set(tripIdx * numStops + arrStopIdx, i);
-
         const arrTime = fwdArrTime[i];
         const newTransfers = wasReached ? earliestArrivalTransfers[depStopIdx] : earliestArrivalTransfers[depStopIdx] + 1;
         const curArrTime = earliestArrivalTime[arrStopIdx];
@@ -877,7 +946,7 @@ export class CSARouter {
         if (arrTime < curArrTime || (arrTime === curArrTime && newTransfers < earliestArrivalTransfers[arrStopIdx])) {
           earliestArrivalTime[arrStopIdx] = arrTime;
           earliestArrivalTransfers[arrStopIdx] = newTransfers;
-          inConnection.set(arrStopIdx, i);
+          inEdgeConn[arrStopIdx] = i;
 
           const ew = endStopWalk[arrStopIdx];
           if (ew !== -1 && arrTime + ew < bestTotalTime) {
@@ -895,13 +964,10 @@ export class CSARouter {
             if (walkArr < fpCurTime || (walkArr === fpCurTime && newTransfers + 1 < earliestArrivalTransfers[fpTo])) {
               earliestArrivalTime[fpTo] = walkArr;
               earliestArrivalTransfers[fpTo] = newTransfers + 1;
-              inConnection.set(fpTo, {
-                type: 'footpath',
-                fromIdx: arrStopIdx,
-                toIdx: fpTo,
-                walkTime: fp.walkTime,
-                connectionTime: arrTime
-              });
+              inEdgeConn[fpTo] = -2;
+              inFpFrom[fpTo] = arrStopIdx;
+              inFpWalk[fpTo] = fp.walkTime;
+              inFpTime[fpTo] = arrTime;
 
               const fpEw = endStopWalk[fpTo];
               if (fpEw !== -1 && walkArr + fpEw < bestTotalTime) {
@@ -960,37 +1026,35 @@ export class CSARouter {
 
     const rawPath: Array<any> = [];
     let currentStopIdx = bestEndStopIdx;
-    let currentItem = inConnection.get(currentStopIdx);
+    let edgeVal = inEdgeConn[currentStopIdx];
 
-    while (currentItem !== undefined) {
-      if (typeof currentItem === 'object' && currentItem.type === 'footpath') {
-        rawPath.unshift(currentItem);
-        currentStopIdx = currentItem.fromIdx;
-        currentItem = inConnection.get(currentStopIdx);
+    while (edgeVal !== -1) {
+      if (edgeVal === -2) {
+        const fromIdx = inFpFrom[currentStopIdx];
+        rawPath.unshift({
+          type: 'footpath',
+          fromIdx,
+          toIdx: currentStopIdx,
+          walkTime: inFpWalk[currentStopIdx],
+          connectionTime: inFpTime[currentStopIdx]
+        });
+        currentStopIdx = fromIdx;
+        edgeVal = inEdgeConn[currentStopIdx];
       } else {
-        const connIdx = currentItem as number;
+        const connIdx = edgeVal;
         const tripIdx = fwdTripIdx[connIdx];
-        const boardStopIdx = tripBoardStop[tripIdx];
-
-        let tempStop = currentStopIdx;
-        let count = 0;
-        while (tempStop !== boardStopIdx) {
-          const cIdx = tripPrevConnection.get(tripIdx * numStops + tempStop);
-          if (cIdx === undefined) break;
-          rawPath.unshift({
-            type: 'conn',
-            depStopIdx: fwdDepStop[cIdx],
-            arrStopIdx: fwdArrStop[cIdx],
-            depTime: fwdDepTime[cIdx],
-            arrTime: fwdArrTime[cIdx],
-            tripIdx: fwdTripIdx[cIdx]
-          });
-          tempStop = fwdDepStop[cIdx];
-          count++;
-          if (count > 100) break;
-        }
+        const boardConnIdx = tripBoardConn[tripIdx];
+        const boardStopIdx = fwdDepStop[boardConnIdx];
+        rawPath.unshift({
+          type: 'conn',
+          depStopIdx: boardStopIdx,
+          arrStopIdx: fwdArrStop[connIdx],
+          depTime: fwdDepTime[boardConnIdx],
+          arrTime: fwdArrTime[connIdx],
+          tripIdx
+        });
         currentStopIdx = boardStopIdx;
-        currentItem = inConnection.get(currentStopIdx);
+        edgeVal = inEdgeConn[currentStopIdx];
       }
       if (rawPath.length > 200) break;
     }
@@ -1126,18 +1190,24 @@ export class CSARouter {
       return [];
     }
 
-    const numStops = this.stopList.length;
-    const numTrips = this.tripList.length;
     const activeService = this.getActiveServiceMask(targetDate);
 
-    const latestDepartureTime = new Int32Array(numStops).fill(NEG_INF);
-    const latestDepartureTransfers = new Int32Array(numStops).fill(INF);
-    const walkToEnd = new Int32Array(numStops).fill(-1);
-    const startStopWalk = new Int32Array(numStops).fill(-1);
-    const tripAlightStop = new Int32Array(numTrips).fill(-1);
+    const latestDepartureTime = this.scratchTime;
+    const latestDepartureTransfers = this.scratchTransfers;
+    const walkToEnd = this.scratchEndWalk;
+    const startStopWalk = this.scratchStartWalk;
+    const tripAlightConn = this.scratchTripConn;
+    const outEdgeConn = this.scratchEdgeConn;
+    const outFpTo = this.scratchFpStop;
+    const outFpWalk = this.scratchFpWalk;
+    const outFpTime = this.scratchFpTime;
 
-    const outConnection = new Map<number, any>();
-    const tripNextConnection = new Map<number, number>(); // key: tripIdx * numStops + depStopIdx -> connIdx
+    latestDepartureTime.fill(NEG_INF);
+    latestDepartureTransfers.fill(INF);
+    walkToEnd.fill(-1);
+    startStopWalk.fill(-1);
+    tripAlightConn.fill(-1);
+    outEdgeConn.fill(-1);
 
     for (let i = 0; i < startStops.length; i++) {
       const { stop, walkTime } = startStops[i];
@@ -1173,7 +1243,7 @@ export class CSARouter {
     const bwdDepTime = this.bwdDepTime;
     const bwdArrTime = this.bwdArrTime;
     const bwdTripIdx = this.bwdTripIdx;
-    const tripList = this.tripList;
+    const tripServiceIdx = this.tripServiceIdx;
     const footpathsByStopIdx = this.footpathsByStopIdx;
 
     for (let i = startIdx; i < n; i++) {
@@ -1183,22 +1253,19 @@ export class CSARouter {
       }
 
       const tripIdx = bwdTripIdx[i];
-      if (activeService[tripList[tripIdx].serviceIdx] === 0) {
+      if (activeService[tripServiceIdx[tripIdx]] === 0) {
         continue;
       }
 
       const arrStopIdx = bwdArrStop[i];
       const arrLatestDep = latestDepartureTime[arrStopIdx];
-      const wasReached = tripAlightStop[tripIdx] !== -1;
+      const wasReached = tripAlightConn[tripIdx] !== -1;
 
       if (arrLatestDep >= arrTime || wasReached) {
         if (!wasReached) {
-          tripAlightStop[tripIdx] = arrStopIdx;
+          tripAlightConn[tripIdx] = i;
         }
         const depStopIdx = bwdDepStop[i];
-        // Only record reachable connections!
-        tripNextConnection.set(tripIdx * numStops + depStopIdx, i);
-
         const depTime = bwdDepTime[i];
         const newTransfers = wasReached ? latestDepartureTransfers[arrStopIdx] : latestDepartureTransfers[arrStopIdx] + 1;
         const curDepTime = latestDepartureTime[depStopIdx];
@@ -1206,7 +1273,7 @@ export class CSARouter {
         if (depTime > curDepTime || (depTime === curDepTime && newTransfers < latestDepartureTransfers[depStopIdx])) {
           latestDepartureTime[depStopIdx] = depTime;
           latestDepartureTransfers[depStopIdx] = newTransfers;
-          outConnection.set(depStopIdx, i);
+          outEdgeConn[depStopIdx] = i;
 
           const sw = startStopWalk[depStopIdx];
           if (sw !== -1 && depTime - sw > bestTotalTime) {
@@ -1224,13 +1291,10 @@ export class CSARouter {
             if (walkDep > fpCurDep || (walkDep === fpCurDep && newTransfers + 1 < latestDepartureTransfers[fpFrom])) {
               latestDepartureTime[fpFrom] = walkDep;
               latestDepartureTransfers[fpFrom] = newTransfers + 1;
-              outConnection.set(fpFrom, {
-                type: 'footpath',
-                fromIdx: fpFrom,
-                toIdx: depStopIdx,
-                walkTime: fp.walkTime,
-                connectionTime: depTime
-              });
+              outEdgeConn[fpFrom] = -2;
+              outFpTo[fpFrom] = depStopIdx;
+              outFpWalk[fpFrom] = fp.walkTime;
+              outFpTime[fpFrom] = depTime;
 
               const fpSw = startStopWalk[fpFrom];
               if (fpSw !== -1 && walkDep - fpSw > bestTotalTime) {
@@ -1288,37 +1352,35 @@ export class CSARouter {
 
     const rawPath: Array<any> = [];
     let currentStopIdx = bestStartStopIdx;
-    let currentItem = outConnection.get(currentStopIdx);
+    let edgeVal = outEdgeConn[currentStopIdx];
 
-    while (currentItem !== undefined) {
-      if (typeof currentItem === 'object' && currentItem.type === 'footpath') {
-        rawPath.push(currentItem);
-        currentStopIdx = currentItem.toIdx;
-        currentItem = outConnection.get(currentStopIdx);
+    while (edgeVal !== -1) {
+      if (edgeVal === -2) {
+        const toIdx = outFpTo[currentStopIdx];
+        rawPath.push({
+          type: 'footpath',
+          fromIdx: currentStopIdx,
+          toIdx,
+          walkTime: outFpWalk[currentStopIdx],
+          connectionTime: outFpTime[currentStopIdx]
+        });
+        currentStopIdx = toIdx;
+        edgeVal = outEdgeConn[currentStopIdx];
       } else {
-        const connIdx = currentItem as number;
+        const connIdx = edgeVal;
         const tripIdx = bwdTripIdx[connIdx];
-        const alightStopIdx = tripAlightStop[tripIdx];
-
-        let tempStop = currentStopIdx;
-        let count = 0;
-        while (tempStop !== alightStopIdx) {
-          const cIdx = tripNextConnection.get(tripIdx * numStops + tempStop);
-          if (cIdx === undefined) break;
-          rawPath.push({
-            type: 'conn',
-            depStopIdx: bwdDepStop[cIdx],
-            arrStopIdx: bwdArrStop[cIdx],
-            depTime: bwdDepTime[cIdx],
-            arrTime: bwdArrTime[cIdx],
-            tripIdx: bwdTripIdx[cIdx]
-          });
-          tempStop = bwdArrStop[cIdx];
-          count++;
-          if (count > 100) break;
-        }
+        const alightConnIdx = tripAlightConn[tripIdx];
+        const alightStopIdx = bwdArrStop[alightConnIdx];
+        rawPath.push({
+          type: 'conn',
+          depStopIdx: bwdDepStop[connIdx],
+          arrStopIdx: alightStopIdx,
+          depTime: bwdDepTime[connIdx],
+          arrTime: bwdArrTime[alightConnIdx],
+          tripIdx
+        });
         currentStopIdx = alightStopIdx;
-        currentItem = outConnection.get(currentStopIdx);
+        edgeVal = outEdgeConn[currentStopIdx];
       }
       if (rawPath.length > 200) break;
     }
