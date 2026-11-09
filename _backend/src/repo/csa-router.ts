@@ -1,4 +1,3 @@
-import { Driver } from 'neo4j-driver';
 import fs from 'fs';
 import path from 'path';
 import { createReadStream } from 'fs';
@@ -609,7 +608,7 @@ export class CSARouter {
     return true;
   }
 
-  async loadGraph(driver?: Driver) {
+  async loadGraph() {
     console.time('[CSA] Total load time');
     try {
       const dataDir = this.resolveDataDir();
@@ -620,129 +619,8 @@ export class CSARouter {
         }
       }
 
-      if (!driver) {
-        throw new Error('No local GTFS data found and no Neo4j driver provided');
-      }
-
-      console.log('[CSA] Falling back to loading graph from Neo4j...');
-      const session = driver.session();
-      try {
-        this.stopList = [];
-        this.stopIdToIdx.clear();
-        this.tripList = [];
-        this.tripIdToIdx.clear();
-        this.serviceList = [{
-          id: '__ALL__',
-          daysMask: 0b1111111,
-          startDate: 19700101,
-          endDate: 20991231,
-          addedDates: new Set(),
-          removedDates: new Set()
-        }];
-        this.serviceIdToIdx.set('__ALL__', 0);
-
-        const stopResult = await session.run(`MATCH (s:Stop) RETURN s.id as id, s.name as name, s.latitude as lat, s.longitude as lon`);
-        for (const record of stopResult.records) {
-          const id = record.get('id');
-          if (!this.stopIdToIdx.has(id)) {
-            const idx = this.stopList.length;
-            this.stopList.push({
-              id,
-              name: record.get('name'),
-              lat: record.get('lat'),
-              lon: record.get('lon'),
-              idx
-            });
-            this.stopIdToIdx.set(id, idx);
-          }
-        }
-
-        this.computeFootpaths();
-
-        const svcResult = await session.run(`
-          MATCH (s:Service)
-          RETURN s.id as id, s.sunday as sun, s.monday as mon, s.tuesday as tue,
-                 s.wednesday as wed, s.thursday as thu, s.friday as fri, s.saturday as sat,
-                 s.start_date as start_date, s.end_date as end_date
-        `);
-        for (const record of svcResult.records) {
-          const id = record.get('id');
-          if (!id || this.serviceIdToIdx.has(id)) continue;
-          let mask = 0;
-          if (record.get('sun')) mask |= (1 << 0);
-          if (record.get('mon')) mask |= (1 << 1);
-          if (record.get('tue')) mask |= (1 << 2);
-          if (record.get('wed')) mask |= (1 << 3);
-          if (record.get('thu')) mask |= (1 << 4);
-          if (record.get('fri')) mask |= (1 << 5);
-          if (record.get('sat')) mask |= (1 << 6);
-          const idx = this.serviceList.length;
-          this.serviceList.push({
-            id,
-            daysMask: mask,
-            startDate: parseInt(record.get('start_date'), 10) || 19700101,
-            endDate: parseInt(record.get('end_date'), 10) || 20991231,
-            addedDates: new Set(),
-            removedDates: new Set()
-          });
-          this.serviceIdToIdx.set(id, idx);
-        }
-
-        const tripResult = await session.run(`
-          MATCH (t:Trip)-[:ON_ROUTE]->(r:Route)
-          RETURN t.id as id, t.service_id as service_id, r.short_name as short_name, r.long_name as long_name, r.type as type
-        `);
-        for (const record of tripResult.records) {
-          const id = record.get('id');
-          if (this.tripIdToIdx.has(id)) continue;
-          const rawType = record.get('type');
-          const svcId = record.get('service_id');
-          const idx = this.tripList.length;
-          this.tripList.push({
-            id,
-            route_short_name: record.get('short_name') || '',
-            route_long_name: record.get('long_name') || '',
-            route_type: (rawType !== null && rawType !== undefined) ? (typeof rawType.toNumber === 'function' ? rawType.toNumber() : Number(rawType)) : 3,
-            serviceIdx: (svcId && this.serviceIdToIdx.get(svcId)) ?? 0
-          });
-          this.tripIdToIdx.set(id, idx);
-        }
-
-        const connResult = await session.run(`
-          MATCH (st1:StopTime)-[:NEXT_STOP]->(st2:StopTime)
-          RETURN st1.stop_id as dep_stop, st2.stop_id as arr_stop,
-                 st1.departure_time as dep_time, st2.arrival_time as arr_time,
-                 st1.trip_id as trip_id
-        `);
-
-        const rawDepStop: number[] = [];
-        const rawArrStop: number[] = [];
-        const rawDepTime: number[] = [];
-        const rawArrTime: number[] = [];
-        const rawTripIdx: number[] = [];
-
-        for (const record of connResult.records) {
-          const depStopIdx = this.stopIdToIdx.get(record.get('dep_stop'));
-          const arrStopIdx = this.stopIdToIdx.get(record.get('arr_stop'));
-          const tripIdx = this.tripIdToIdx.get(record.get('trip_id'));
-          const depTime = this.timeToSeconds(record.get('dep_time'));
-          const arrTime = this.timeToSeconds(record.get('arr_time'));
-          if (depStopIdx !== undefined && arrStopIdx !== undefined && tripIdx !== undefined && depTime !== -1 && arrTime !== -1) {
-            rawDepStop.push(depStopIdx);
-            rawArrStop.push(arrStopIdx);
-            rawDepTime.push(depTime);
-            rawArrTime.push(arrTime);
-            rawTripIdx.push(tripIdx);
-          }
-        }
-
-        this.buildTypedConnectionColumns(rawDepStop, rawArrStop, rawDepTime, rawArrTime, rawTripIdx);
-        this.activeServiceCache.clear();
-        this.ready = true;
-        console.log(`[CSA] Graph loaded from Neo4j. Stops: ${this.stopList.length}, Trips: ${this.tripList.length}, Connections: ${this.numConnections}`);
-      } finally {
-        await session.close();
-      }
+      console.error('[CSA] Failed to load routing graph: no local GTFS data found');
+      this.ready = false;
     } finally {
       console.timeEnd('[CSA] Total load time');
     }

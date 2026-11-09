@@ -9,10 +9,6 @@
     "start": "node dist/app.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/2526-wmc-3bhif-classroom-org/sommerprojekt-wmc-hungry-team.git"
-  },
   "dependencies": {
     "bcryptjs": "^3.0.2",
     "better-sqlite3": "^11.8.1",
@@ -20,8 +16,7 @@
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
     "express": "^4.18.2",
-    "knxultimate": "^6.4.0",
-    "neo4j-driver": "^5.28.1"
+    "knxultimate": "^6.4.0"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

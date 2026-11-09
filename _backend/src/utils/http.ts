@@ -8,7 +8,7 @@ function fetchJsonSingle(url: string, timeout = 30000): Promise<any> {
     const options = {
       family: 4,
       headers: {
-        'User-Agent': 'SmartHub/1.0 (https://github.com/2526-wmc-3bhif-classroom-org/sommerprojekt-wmc-hungry-team)'
+        'User-Agent': 'SmartHub/1.0'
       }
     };
     const request = https.get(url, options, (res) => {

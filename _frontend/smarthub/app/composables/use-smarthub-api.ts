@@ -44,9 +44,8 @@ export interface DeviceCommandDTO {
 }
 
 interface ServiceStatusResponse {
-  status: 'ok' | 'error'
+  status: 'ok' | 'loading' | 'error'
   backend: string
-  neo4j: 'up' | 'down'
   timestamp: string
 }
 
