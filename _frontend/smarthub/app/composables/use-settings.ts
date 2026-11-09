@@ -6,6 +6,13 @@ export type AlarmItem = {
   enabled: boolean
 }
 
+export type RoutineCoords = {
+  address: string
+  lat: number
+  lon: number
+  formattedAddress?: string
+}
+
 export type RoutineItem = {
   id: string
   name: string
@@ -14,6 +21,8 @@ export type RoutineItem = {
   arrivalTime: string
   destination: string
   startAddress: string
+  startCoords?: RoutineCoords
+  destCoords?: RoutineCoords
   transportMode: 'bus' | 'car'
   activeDays: number[] // 0 = Sun, 1 = Mon, ..., 6 = Sat
   alarms: AlarmItem[]
@@ -34,14 +43,21 @@ export type Settings = {
 
 // Convert API routine response to frontend RoutineItem
 function apiToRoutineItem(r: any): RoutineItem {
+  const startAddress = r.startAddress || ''
+  const destination = r.destination || ''
+  const rawStartCoords = r.config?.startCoords
+  const rawDestCoords = r.config?.destCoords
+
   return {
     id: r.id,
     name: r.name || 'Routine',
     startTime: r.startTime || '08:00',
     endTime: r.endTime || '09:00',
     arrivalTime: r.arrivalTime || '08:00',
-    destination: r.destination || '',
-    startAddress: r.startAddress || '',
+    destination,
+    startAddress,
+    startCoords: rawStartCoords && rawStartCoords.address === startAddress ? rawStartCoords : undefined,
+    destCoords: rawDestCoords && rawDestCoords.address === destination ? rawDestCoords : undefined,
     transportMode: r.transportMode || 'bus',
     activeDays: r.days || [],
     alarms: r.config?.alarms || []
@@ -50,6 +66,9 @@ function apiToRoutineItem(r: any): RoutineItem {
 
 // Convert frontend RoutineItem to API request body
 function routineItemToApi(item: RoutineItem): Record<string, unknown> {
+  const startCoords = item.startCoords && item.startCoords.address === item.startAddress ? item.startCoords : undefined
+  const destCoords = item.destCoords && item.destCoords.address === item.destination ? item.destCoords : undefined
+
   return {
     name: item.name || 'Routine',
     start_time: item.startTime,
@@ -60,7 +79,9 @@ function routineItemToApi(item: RoutineItem): Record<string, unknown> {
     destination: item.destination || '',
     start_address: item.startAddress || '',
     config: {
-      alarms: item.alarms || []
+      alarms: item.alarms || [],
+      ...(startCoords ? { startCoords } : {}),
+      ...(destCoords ? { destCoords } : {})
     }
   }
 }

@@ -129,22 +129,40 @@ async function autoConfigure(item: any) {
   if (item.transportMode === 'bus' && !item.startAddress) { alert('Please set a start address first.'); return; }
 
   try {
-    const place = await geocodePlace(item.destination)
-    let home
-    if (item.transportMode === 'bus') {
-      home = await geocodePlace(item.startAddress)
+    let destCoords = item.destCoords?.address === item.destination ? item.destCoords : undefined
+    if (!destCoords) {
+      const place = await geocodePlace(item.destination)
+      destCoords = {
+        address: item.destination,
+        lat: place.coordinates.lat,
+        lon: place.coordinates.lon,
+        formattedAddress: place.formattedAddress
+      }
+      item.destCoords = destCoords
+    }
+
+    let startCoords = item.startCoords?.address === item.startAddress ? item.startCoords : undefined
+    if (item.transportMode === 'bus' && !startCoords) {
+      const home = await geocodePlace(item.startAddress)
+      startCoords = {
+        address: item.startAddress,
+        lat: home.coordinates.lat,
+        lon: home.coordinates.lon,
+        formattedAddress: home.formattedAddress
+      }
+      item.startCoords = startCoords
     }
 
     const arrival = item.arrivalTime.includes(':') && item.arrivalTime.split(':').length >= 2 ? (item.arrivalTime.length === 5 ? item.arrivalTime + ':00' : item.arrivalTime) : item.arrivalTime + ':00'
 
     let departureTimeStr = ''
     
-    if (item.transportMode === 'bus' && home) {
+    if (item.transportMode === 'bus' && startCoords && destCoords) {
       const routes = await get<any[]>('/api/bus/route', {
-        lat_a: home.coordinates.lat,
-        lon_a: home.coordinates.lon,
-        lat_b: place.coordinates.lat,
-        lon_b: place.coordinates.lon,
+        lat_a: startCoords.lat,
+        lon_a: startCoords.lon,
+        lat_b: destCoords.lat,
+        lon_b: destCoords.lon,
         arrival_time: arrival,
         max_transfers: 2,
       })
@@ -428,7 +446,13 @@ onMounted(async () => {
                 <label class="field-label">Start Address</label>
                 <AddressAutocomplete 
                   :model-value="item.startAddress" 
-                  @update:model-value="(val) => { item.startAddress = val; updateRoutineItem(item) }"
+                  @update:model-value="(val) => {
+                    if (item.startAddress !== val) {
+                      item.startAddress = val;
+                      item.startCoords = undefined;
+                      updateRoutineItem(item);
+                    }
+                  }"
                   placeholder="e.g. Central Station" 
                 />
               </div>
@@ -436,7 +460,13 @@ onMounted(async () => {
                 <label class="field-label">Destination Address</label>
                 <AddressAutocomplete 
                   :model-value="item.destination" 
-                  @update:model-value="(val) => { item.destination = val; updateRoutineItem(item) }"
+                  @update:model-value="(val) => {
+                    if (item.destination !== val) {
+                      item.destination = val;
+                      item.destCoords = undefined;
+                      updateRoutineItem(item);
+                    }
+                  }"
                   placeholder="e.g. City Center" 
                 />
               </div>

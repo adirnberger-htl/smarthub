@@ -50,7 +50,6 @@ const fetchSuggestions = async (query: string) => {
 const onInput = (e: Event) => {
   const value = (e.target as HTMLInputElement).value
   inputValue.value = value
-  emit('update:modelValue', value)
   
   clearTimeout(debounceTimeout)
   debounceTimeout = setTimeout(() => {
@@ -58,17 +57,30 @@ const onInput = (e: Event) => {
   }, 300)
 }
 
+const commitValue = (val: string) => {
+  if (val !== props.modelValue) {
+    emit('update:modelValue', val)
+  }
+}
+
 const selectSuggestion = (desc: string) => {
   inputValue.value = desc
-  emit('update:modelValue', desc)
+  commitValue(desc)
   showSuggestions.value = false
 }
 
-// Hide dropdown when clicking outside (simple approach: hide on blur with a delay so click registers)
+// Commit value synchronously on blur so buttons clicked immediately (e.g. Auto-Configure) see the latest address,
+// then hide dropdown after a short delay so suggestion click registers
 const onBlur = () => {
+  commitValue(inputValue.value)
   setTimeout(() => {
     showSuggestions.value = false
   }, 200)
+}
+
+const onKeydownEnter = () => {
+  commitValue(inputValue.value)
+  showSuggestions.value = false
 }
 
 onBeforeUnmount(() => {
@@ -86,6 +98,7 @@ onBeforeUnmount(() => {
       :disabled="disabled"
       @input="onInput"
       @blur="onBlur"
+      @keydown.enter="onKeydownEnter"
       @focus="() => { if (suggestions.length > 0) showSuggestions = true }"
     />
     <div v-if="loading" class="autocomplete-loading">...</div>
@@ -95,7 +108,7 @@ onBeforeUnmount(() => {
         v-for="s in suggestions" 
         :key="s.place_id" 
         class="autocomplete-item"
-        @click="selectSuggestion(s.description)"
+        @mousedown.prevent="selectSuggestion(s.description)"
       >
         {{ s.description }}
       </li>

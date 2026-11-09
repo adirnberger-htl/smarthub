@@ -291,3 +291,4 @@ fabric.properties
 data/LINZ_AG_GTFS_2026
 data/OOEVV_GTFS_2026
 data/smarthub.sqlite*
+data/csa-graph-cache.*

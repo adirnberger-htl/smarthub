@@ -6,7 +6,7 @@ import { useSmarthubApi } from '../composables/use-smarthub-api'
 import { useSettings } from '../composables/use-settings'
 import type { RoutineItem } from '../composables/use-settings'
 
-const { state } = useSettings()
+const { state, updateRoutineItem } = useSettings()
 
 const props = defineProps<{
   routine?: RoutineItem | null
@@ -105,48 +105,61 @@ const fetchActiveRoute = async () => {
   loading.value = true
   error.value = ''
   try {
-    const [start, end] = await Promise.all([
-      geocodePlace(startPlace.value),
-      geocodePlace(endPlace.value),
+    const currentRoutine = busRoutine.value
+    const sAddr = startPlace.value.trim()
+    const eAddr = endPlace.value.trim()
+
+    let startCoords = currentRoutine?.startCoords?.address === sAddr ? currentRoutine.startCoords : undefined
+    let destCoords = currentRoutine?.destCoords?.address === eAddr ? currentRoutine.destCoords : undefined
+    let coordsUpdated = false
+
+    const [resolvedStart, resolvedEnd] = await Promise.all([
+      startCoords
+        ? Promise.resolve({ coordinates: { lat: startCoords.lat, lon: startCoords.lon }, formattedAddress: startCoords.formattedAddress })
+        : geocodePlace(sAddr),
+      destCoords
+        ? Promise.resolve({ coordinates: { lat: destCoords.lat, lon: destCoords.lon }, formattedAddress: destCoords.formattedAddress })
+        : geocodePlace(eAddr),
     ])
 
-    const targetArrival = busRoutine.value?.arrivalTime ? `${busRoutine.value.arrivalTime}:00` : '08:00:00'
-
-    const fetchRoutesByArrival = (arrivalTimeVal: string) => {
-      return get<BusRouteApiResponse[]>('/api/bus/route', {
-        lat_a: start.coordinates.lat,
-        lon_a: start.coordinates.lon,
-        lat_b: end.coordinates.lat,
-        lon_b: end.coordinates.lon,
-        arrival_time: arrivalTimeVal,
-        max_transfers: MAX_TRANSFERS,
-      })
+    if (currentRoutine) {
+      if (!startCoords) {
+        currentRoutine.startCoords = {
+          address: sAddr,
+          lat: resolvedStart.coordinates.lat,
+          lon: resolvedStart.coordinates.lon,
+          formattedAddress: resolvedStart.formattedAddress
+        }
+        coordsUpdated = true
+      }
+      if (!destCoords) {
+        currentRoutine.destCoords = {
+          address: eAddr,
+          lat: resolvedEnd.coordinates.lat,
+          lon: resolvedEnd.coordinates.lon,
+          formattedAddress: resolvedEnd.formattedAddress
+        }
+        coordsUpdated = true
+      }
+      if (coordsUpdated) {
+        updateRoutineItem(currentRoutine)
+      }
     }
 
-    const fetchRoutesByDeparture = (departureTimeVal: string) => {
-      return get<BusRouteApiResponse[]>('/api/bus/route', {
-        lat_a: start.coordinates.lat,
-        lon_a: start.coordinates.lon,
-        lat_b: end.coordinates.lat,
-        lon_b: end.coordinates.lon,
-        departure_time: departureTimeVal,
-        max_transfers: MAX_TRANSFERS,
-      })
-    }
-
-    let routes = await fetchRoutesByArrival(targetArrival)
-    let selectedRoute = routes[0]
-
+    const targetArrival = currentRoutine?.arrivalTime ? `${currentRoutine.arrivalTime}:00` : '08:00:00'
     const nowTime = getCurrentTimeParam()
-    if (selectedRoute && selectedRoute.departure_time < nowTime) {
-      routes = await fetchRoutesByDeparture(nowTime)
-      selectedRoute = routes[0]
-    } else if (!selectedRoute) {
-      routes = await fetchRoutesByDeparture(nowTime)
-      selectedRoute = routes[0]
-    }
 
-    route.value = selectedRoute ?? null
+    const routes = await get<BusRouteApiResponse[]>('/api/bus/route', {
+      lat_a: resolvedStart.coordinates.lat,
+      lon_a: resolvedStart.coordinates.lon,
+      lat_b: resolvedEnd.coordinates.lat,
+      lon_b: resolvedEnd.coordinates.lon,
+      arrival_time: targetArrival,
+      min_departure_time: nowTime,
+      max_transfers: MAX_TRANSFERS,
+    })
+
+    route.value = routes[0] ?? null
     if (!route.value) {
       error.value = 'No route found'
     }
@@ -158,9 +171,13 @@ const fetchActiveRoute = async () => {
   }
 }
 
-watch(busRoutine, () => {
-  fetchActiveRoute()
-}, { immediate: true })
+watch(
+  () => [busRoutine.value?.startAddress, busRoutine.value?.destination, busRoutine.value?.arrivalTime] as const,
+  () => {
+    fetchActiveRoute()
+  },
+  { immediate: true }
+)
 
 const timelineRef = ref<HTMLElement | null>(null)
 const isHovered = ref(false)

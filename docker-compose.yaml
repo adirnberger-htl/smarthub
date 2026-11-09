@@ -5,9 +5,11 @@ services:
     environment:
       NEO4J_AUTH: ${NEO4J_USER}/${NEO4J_PASSWORD}
       NEO4J_dbms_security_procedures_unrestricted: apoc.*
-      NEO4J_dbms_memory_heap_initial__size: 4G
-      NEO4J_dbms_memory_heap_max__size: 4G
-      NEO4J_dbms_memory_transaction_total_max: 4G
+      NEO4J_dbms_memory_heap_initial__size: 512M
+      NEO4J_dbms_memory_heap_max__size: 1G
+      NEO4J_dbms_memory_transaction_total_max: 1G
+    profiles:
+      - neo4j
     ports:
       - "${NEO4J_BOLT_PORT:-7687}:7687"
       - "${NEO4J_HTTP_PORT:-7474}:7474"
@@ -24,6 +26,8 @@ services:
   neo4j-loader:
     image: node:20-alpine
     container_name: gtfs_neo4j_loader
+    profiles:
+      - neo4j
     depends_on:
       neo4j:
         condition: service_healthy
@@ -36,7 +40,7 @@ services:
       NEO4J_BOLT_PORT: 7687
       NEO4J_USER: ${NEO4J_USER}
       NEO4J_PASSWORD: ${NEO4J_PASSWORD}
-      NODE_OPTIONS: "--max-old-space-size=4096"
+      NODE_OPTIONS: "--max-old-space-size=1024"
     working_dir: /scripts
     entrypoint:
       - sh
@@ -67,13 +71,12 @@ services:
       NEO4J_PROTOCOL: bolt
       NEO4J_BOLT_PORT: 7687
       DB_PATH: /data/smarthub.sqlite
+      GTFS_DATA_DIR: /gtfs_data
       COOKIE_SECURE: "false"
-      NODE_OPTIONS: --max-old-space-size=4096
-    depends_on:
-      neo4j:
-        condition: service_healthy
+      NODE_OPTIONS: --max-old-space-size=1024
     volumes:
       - smarthub_data:/data
+      - ./data:/gtfs_data
     restart: unless-stopped
 
   frontend:
@@ -83,7 +86,7 @@ services:
       target: dev
     environment:
       NODE_ENV: development
-      NODE_OPTIONS: --max-old-space-size=6000
+      NODE_OPTIONS: --max-old-space-size=1536
       NUXT_PUBLIC_API_BASE_URL: ${NUXT_PUBLIC_API_BASE_URL:-http://localhost:3000}
     depends_on:
       - backend

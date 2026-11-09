@@ -53,7 +53,11 @@ const transportMode = computed(() => activeRoutine.value?.transportMode)
   <div class="dashboard">
     <div class="dashboard__left">
       <clock-widget class="dashboard__clock" />
-      <weather-widget class="dashboard__weather" :active-destination="activeRoutine?.destination" />
+      <weather-widget
+        class="dashboard__weather"
+        :active-destination="activeRoutine?.destination"
+        :active-destination-coords="activeRoutine?.destCoords"
+      />
       <appointments-widget class="dashboard__appointments" />
     </div>
     <div class="dashboard__right">

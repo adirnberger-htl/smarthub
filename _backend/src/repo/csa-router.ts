@@ -1,4 +1,12 @@
 import { Driver } from 'neo4j-driver';
+import fs from 'fs';
+import path from 'path';
+import { createReadStream } from 'fs';
+import { createInterface } from 'readline';
+import { execFileSync } from 'child_process';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export interface Connection {
   departure_stop: string;
@@ -13,6 +21,7 @@ export interface StopData {
   name: string;
   lat: number;
   lon: number;
+  idx: number;
 }
 
 export interface TripData {
@@ -20,261 +29,1015 @@ export interface TripData {
   route_short_name: string;
   route_long_name: string;
   route_type: number;
+  serviceIdx: number;
 }
 
-export interface Footpath {
-  from: string;
-  to: string;
+export interface ServiceData {
+  id: string;
+  daysMask: number; // bit 0 = Sun, bit 1 = Mon, ..., bit 6 = Sat
+  startDate: number; // YYYYMMDD as int
+  endDate: number;   // YYYYMMDD as int
+  addedDates: Set<number>;
+  removedDates: Set<number>;
+}
+
+export interface IndexedFootpath {
+  toIdx: number;
   walkTime: number;
 }
 
+interface CacheMetadata {
+  version: number;
+  sourceMtimeMs: number;
+  stops: Array<{ id: string; name: string; lat: number; lon: number }>;
+  trips: Array<{ id: string; s: string; l: string; t: number; svc: number }>;
+  services: Array<{ id: string; mask: number; start: number; end: number; add: number[]; rem: number[] }>;
+  footpaths: Array<Array<[number, number]>>;
+  numConnections: number;
+}
+
+const CACHE_VERSION = 2;
+
 export class CSARouter {
-  private connections: Connection[] = [];
-  private backwardConnections: Connection[] = [];
-  private stops = new Map<string, StopData>();
-  private trips = new Map<string, TripData>();
-  private footpaths = new Map<string, Footpath[]>();
+  private stopList: StopData[] = [];
+  private stopIdToIdx = new Map<string, number>();
+  private tripList: TripData[] = [];
+  private tripIdToIdx = new Map<string, number>();
+  private serviceList: ServiceData[] = [];
+  private serviceIdToIdx = new Map<string, number>();
+  private footpathsByStopIdx: IndexedFootpath[][] = [];
+
+  // Compact TypedArray columns for forward connections (sorted ascending by departure_time)
+  private numConnections = 0;
+  private fwdDepStop = new Int32Array(0);
+  private fwdArrStop = new Int32Array(0);
+  private fwdDepTime = new Int32Array(0);
+  private fwdArrTime = new Int32Array(0);
+  private fwdTripIdx = new Int32Array(0);
+
+  // Compact TypedArray columns for reverse connections (sorted descending by arrival_time)
+  private bwdDepStop = new Int32Array(0);
+  private bwdArrStop = new Int32Array(0);
+  private bwdDepTime = new Int32Array(0);
+  private bwdArrTime = new Int32Array(0);
+  private bwdTripIdx = new Int32Array(0);
+
+  // Active service cache by YYYYMMDD integer
+  private activeServiceCache = new Map<number, Uint8Array>();
+
   public ready = false;
 
-  private timeToSeconds(timeStr: string): number {
-    const parts = timeStr.split(':').map(Number);
-    if (parts.length !== 3) return -1;
-    return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  public timeToSeconds(timeStr: string): number {
+    if (!timeStr) return -1;
+    const parts = timeStr.trim().split(':');
+    if (parts.length < 2) return -1;
+    const h = Number(parts[0]);
+    const m = Number(parts[1]);
+    const s = parts.length >= 3 ? Number(parts[2]) : 0;
+    if (Number.isNaN(h) || Number.isNaN(m) || Number.isNaN(s)) return -1;
+    return h * 3600 + m * 60 + s;
   }
 
-  private secondsToTime(seconds: number): string {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = seconds % 60;
+  public secondsToTime(seconds: number): string {
+    const wrapped = ((seconds % 86400) + 86400) % 86400;
+    const h = Math.floor(wrapped / 3600);
+    const m = Math.floor((wrapped % 3600) / 60);
+    const s = wrapped % 60;
     return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   }
 
-  async loadGraph(driver: Driver) {
-    console.log('[CSA] Loading graph from Neo4j...');
-    console.time('[CSA] Total load time');
-    const session = driver.session();
-    try {
-      console.time('[CSA] Load Stops');
-      const stopResult = await session.run(`MATCH (s:Stop) RETURN s.id as id, s.name as name, s.latitude as lat, s.longitude as lon`);
-      for (const record of stopResult.records) {
-        this.stops.set(record.get('id'), {
-          id: record.get('id'),
-          name: record.get('name'),
-          lat: record.get('lat'),
-          lon: record.get('lon')
-        });
-      }
-      console.timeEnd('[CSA] Load Stops');
+  private resolveDataDir(): string | null {
+    const candidates = [
+      process.env.GTFS_DATA_DIR,
+      '/data',
+      path.resolve(__dirname, '../../../data'),
+      path.resolve(process.cwd(), '../data'),
+      path.resolve(process.cwd(), 'data')
+    ].filter(Boolean) as string[];
 
-      console.time('[CSA] Compute Footpaths');
-      const MAX_TRANSFER_METERS = 300;
-      const WALK_SPEED = 1.4; // m/s
-      const stopList = Array.from(this.stops.values());
-      for (let i = 0; i < stopList.length; i++) {
-        const s1 = stopList[i];
-        const paths: Footpath[] = [];
-        paths.push({ from: s1.id, to: s1.id, walkTime: 0 });
-        for (let j = 0; j < stopList.length; j++) {
-          if (i === j) continue;
-          const s2 = stopList[j];
-          const latDiff = Math.abs(s1.lat - s2.lat);
-          const lonDiff = Math.abs(s1.lon - s2.lon);
-          if (latDiff > 0.005 || lonDiff > 0.005) continue; 
-          
-          const dist = this.getDistanceMeters(s1.lat, s1.lon, s2.lat, s2.lon);
-          if (dist <= MAX_TRANSFER_METERS) {
-            paths.push({ from: s1.id, to: s2.id, walkTime: Math.round(dist / WALK_SPEED) });
+    for (const dir of candidates) {
+      if (fs.existsSync(dir)) {
+        const hasLinz = fs.existsSync(path.join(dir, 'LINZ_AG_GTFS_2026')) || fs.existsSync(path.join(dir, 'LINZ_AG_GTFS_2026.zip'));
+        const hasOoevv = fs.existsSync(path.join(dir, 'OOEVV_GTFS_2026')) || fs.existsSync(path.join(dir, 'OOEVV_GTFS_2026.zip'));
+        if (hasLinz || hasOoevv) {
+          return dir;
+        }
+      }
+    }
+    return null;
+  }
+
+  private ensureDatasetExtracted(dataDir: string, folderName: string): string | null {
+    const targetDir = path.join(dataDir, folderName);
+    const stopsFile = path.join(targetDir, 'stops.txt');
+    if (fs.existsSync(stopsFile)) {
+      return targetDir;
+    }
+    const zipFile = path.join(dataDir, `${folderName}.zip`);
+    if (fs.existsSync(zipFile)) {
+      try {
+        console.log(`[CSA] Extracting ${zipFile} to ${targetDir}...`);
+        fs.mkdirSync(targetDir, { recursive: true });
+        execFileSync('unzip', ['-o', '-q', zipFile, '-d', targetDir]);
+        if (fs.existsSync(stopsFile)) {
+          return targetDir;
+        }
+      } catch (e: any) {
+        console.warn(`[CSA] Failed to extract ${zipFile}: ${e.message}`);
+      }
+    }
+    return null;
+  }
+
+  private getDatasetsLatestMtime(dirs: string[]): number {
+    let maxMtime = 0;
+    const files = ['stops.txt', 'routes.txt', 'trips.txt', 'stop_times.txt', 'calendar.txt', 'calendar_dates.txt'];
+    for (const d of dirs) {
+      for (const f of files) {
+        const p = path.join(d, f);
+        if (fs.existsSync(p)) {
+          const stat = fs.statSync(p);
+          if (stat.mtimeMs > maxMtime) maxMtime = stat.mtimeMs;
+        }
+      }
+    }
+    return Math.floor(maxMtime);
+  }
+
+  private tryLoadFromDiskCache(dataDir: string, expectedMtime: number): boolean {
+    const metaPath = path.join(dataDir, 'csa-graph-cache.meta.json');
+    const binPath = path.join(dataDir, 'csa-graph-cache.bin');
+    if (!fs.existsSync(metaPath) || !fs.existsSync(binPath)) return false;
+
+    try {
+      console.time('[CSA] Load from disk cache');
+      const metaRaw = fs.readFileSync(metaPath, 'utf8');
+      const meta = JSON.parse(metaRaw) as CacheMetadata;
+      if (meta.version !== CACHE_VERSION || meta.sourceMtimeMs !== expectedMtime) {
+        console.timeEnd('[CSA] Load from disk cache');
+        return false;
+      }
+
+      const n = meta.numConnections;
+      const expectedBytes = n * 10 * 4;
+      const buf = fs.readFileSync(binPath);
+      if (buf.byteLength !== expectedBytes) {
+        console.timeEnd('[CSA] Load from disk cache');
+        return false;
+      }
+
+      this.stopList = [];
+      this.stopIdToIdx.clear();
+      for (let i = 0; i < meta.stops.length; i++) {
+        const s = meta.stops[i];
+        this.stopList.push({ id: s.id, name: s.name, lat: s.lat, lon: s.lon, idx: i });
+        this.stopIdToIdx.set(s.id, i);
+      }
+
+      this.serviceList = [];
+      this.serviceIdToIdx.clear();
+      for (let i = 0; i < meta.services.length; i++) {
+        const sv = meta.services[i];
+        this.serviceList.push({
+          id: sv.id,
+          daysMask: sv.mask,
+          startDate: sv.start,
+          endDate: sv.end,
+          addedDates: new Set(sv.add),
+          removedDates: new Set(sv.rem)
+        });
+        this.serviceIdToIdx.set(sv.id, i);
+      }
+
+      this.tripList = [];
+      this.tripIdToIdx.clear();
+      for (let i = 0; i < meta.trips.length; i++) {
+        const t = meta.trips[i];
+        this.tripList.push({
+          id: t.id,
+          route_short_name: t.s,
+          route_long_name: t.l,
+          route_type: t.t,
+          serviceIdx: t.svc
+        });
+        this.tripIdToIdx.set(t.id, i);
+      }
+
+      this.footpathsByStopIdx = meta.footpaths.map(list =>
+        list.map(([toIdx, walkTime]) => ({ toIdx, walkTime }))
+      );
+
+      this.numConnections = n;
+      const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+      const i32 = new Int32Array(ab);
+      this.fwdDepStop = i32.subarray(0, n);
+      this.fwdArrStop = i32.subarray(n, 2 * n);
+      this.fwdDepTime = i32.subarray(2 * n, 3 * n);
+      this.fwdArrTime = i32.subarray(3 * n, 4 * n);
+      this.fwdTripIdx = i32.subarray(4 * n, 5 * n);
+      this.bwdDepStop = i32.subarray(5 * n, 6 * n);
+      this.bwdArrStop = i32.subarray(6 * n, 7 * n);
+      this.bwdDepTime = i32.subarray(7 * n, 8 * n);
+      this.bwdArrTime = i32.subarray(8 * n, 9 * n);
+      this.bwdTripIdx = i32.subarray(9 * n, 10 * n);
+
+      this.activeServiceCache.clear();
+      this.ready = true;
+      console.timeEnd('[CSA] Load from disk cache');
+      console.log(`[CSA] Loaded cached graph. Stops: ${this.stopList.length}, Trips: ${this.tripList.length}, Services: ${this.serviceList.length}, Connections: ${this.numConnections}`);
+      return true;
+    } catch (e: any) {
+      console.warn(`[CSA] Disk cache read failed, rebuilding: ${e.message}`);
+      return false;
+    }
+  }
+
+  private saveToDiskCache(dataDir: string, sourceMtimeMs: number): void {
+    try {
+      const metaPath = path.join(dataDir, 'csa-graph-cache.meta.json');
+      const binPath = path.join(dataDir, 'csa-graph-cache.bin');
+      const meta: CacheMetadata = {
+        version: CACHE_VERSION,
+        sourceMtimeMs,
+        stops: this.stopList.map(s => ({ id: s.id, name: s.name, lat: s.lat, lon: s.lon })),
+        trips: this.tripList.map(t => ({ id: t.id, s: t.route_short_name, l: t.route_long_name, t: t.route_type, svc: t.serviceIdx })),
+        services: this.serviceList.map(sv => ({
+          id: sv.id,
+          mask: sv.daysMask,
+          start: sv.startDate,
+          end: sv.endDate,
+          add: Array.from(sv.addedDates),
+          rem: Array.from(sv.removedDates)
+        })),
+        footpaths: this.footpathsByStopIdx.map(list => list.map(fp => [fp.toIdx, fp.walkTime])),
+        numConnections: this.numConnections
+      };
+
+      const n = this.numConnections;
+      const combined = new Int32Array(n * 10);
+      combined.set(this.fwdDepStop, 0);
+      combined.set(this.fwdArrStop, n);
+      combined.set(this.fwdDepTime, 2 * n);
+      combined.set(this.fwdArrTime, 3 * n);
+      combined.set(this.fwdTripIdx, 4 * n);
+      combined.set(this.bwdDepStop, 5 * n);
+      combined.set(this.bwdArrStop, 6 * n);
+      combined.set(this.bwdDepTime, 7 * n);
+      combined.set(this.bwdArrTime, 8 * n);
+      combined.set(this.bwdTripIdx, 9 * n);
+
+      fs.writeFileSync(binPath, Buffer.from(combined.buffer, combined.byteOffset, combined.byteLength));
+      fs.writeFileSync(metaPath, JSON.stringify(meta));
+      console.log(`[CSA] Saved compiled graph cache to ${dataDir}`);
+    } catch (e: any) {
+      console.warn(`[CSA] Could not write disk cache: ${e.message}`);
+    }
+  }
+
+  private parseCSVLine(line: string): string[] {
+    const result: string[] = [];
+    let current = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+      if (char === '"') {
+        inQuotes = !inQuotes;
+      } else if (char === ',' && !inQuotes) {
+        result.push(current);
+        current = '';
+      } else {
+        current += char;
+      }
+    }
+    result.push(current);
+    return result;
+  }
+
+  private async streamCSV(filePath: string, onRow: (row: Record<string, string>) => void): Promise<void> {
+    if (!fs.existsSync(filePath)) return;
+    const fileStream = createReadStream(filePath);
+    const rl = createInterface({ input: fileStream, crlfDelay: Infinity });
+    let headers: string[] = [];
+    let isFirst = true;
+
+    for await (const rawLine of rl) {
+      const line = rawLine.trim();
+      if (!line) continue;
+      if (isFirst) {
+        headers = this.parseCSVLine(line).map(h => h.replace(/^\uFEFF/, '').trim());
+        isFirst = false;
+      } else {
+        const values = this.parseCSVLine(line);
+        const obj: Record<string, string> = {};
+        for (let i = 0; i < headers.length; i++) {
+          obj[headers[i]] = values[i] ?? '';
+        }
+        onRow(obj);
+      }
+    }
+  }
+
+  private computeFootpaths(): void {
+    console.time('[CSA] Compute Footpaths');
+    const MAX_TRANSFER_METERS = 300;
+    const WALK_SPEED = 1.4; // m/s
+    const n = this.stopList.length;
+    this.footpathsByStopIdx = new Array(n);
+
+    for (let i = 0; i < n; i++) {
+      const s1 = this.stopList[i];
+      const paths: IndexedFootpath[] = [];
+      for (let j = 0; j < n; j++) {
+        if (i === j) continue;
+        const s2 = this.stopList[j];
+        const latDiff = Math.abs(s1.lat - s2.lat);
+        const lonDiff = Math.abs(s1.lon - s2.lon);
+        if (latDiff > 0.005 || lonDiff > 0.005) continue;
+
+        const dist = this.getDistanceMeters(s1.lat, s1.lon, s2.lat, s2.lon);
+        if (dist <= MAX_TRANSFER_METERS) {
+          paths.push({ toIdx: j, walkTime: Math.round(dist / WALK_SPEED) });
+        }
+      }
+      this.footpathsByStopIdx[i] = paths;
+    }
+    console.timeEnd('[CSA] Compute Footpaths');
+  }
+
+  private buildTypedConnectionColumns(
+    rawDepStop: number[],
+    rawArrStop: number[],
+    rawDepTime: number[],
+    rawArrTime: number[],
+    rawTripIdx: number[]
+  ): void {
+    const n = rawDepTime.length;
+    this.numConnections = n;
+
+    // Sort indices for forward connections (ascending by depTime)
+    const fwdOrder = new Int32Array(n);
+    for (let i = 0; i < n; i++) fwdOrder[i] = i;
+    fwdOrder.sort((a, b) => rawDepTime[a] - rawDepTime[b]);
+
+    this.fwdDepStop = new Int32Array(n);
+    this.fwdArrStop = new Int32Array(n);
+    this.fwdDepTime = new Int32Array(n);
+    this.fwdArrTime = new Int32Array(n);
+    this.fwdTripIdx = new Int32Array(n);
+
+    for (let i = 0; i < n; i++) {
+      const idx = fwdOrder[i];
+      this.fwdDepStop[i] = rawDepStop[idx];
+      this.fwdArrStop[i] = rawArrStop[idx];
+      this.fwdDepTime[i] = rawDepTime[idx];
+      this.fwdArrTime[i] = rawArrTime[idx];
+      this.fwdTripIdx[i] = rawTripIdx[idx];
+    }
+
+    // Sort indices for backward connections (descending by arrTime)
+    const bwdOrder = new Int32Array(n);
+    for (let i = 0; i < n; i++) bwdOrder[i] = i;
+    bwdOrder.sort((a, b) => rawArrTime[b] - rawArrTime[a]);
+
+    this.bwdDepStop = new Int32Array(n);
+    this.bwdArrStop = new Int32Array(n);
+    this.bwdDepTime = new Int32Array(n);
+    this.bwdArrTime = new Int32Array(n);
+    this.bwdTripIdx = new Int32Array(n);
+
+    for (let i = 0; i < n; i++) {
+      const idx = bwdOrder[i];
+      this.bwdDepStop[i] = rawDepStop[idx];
+      this.bwdArrStop[i] = rawArrStop[idx];
+      this.bwdDepTime[i] = rawDepTime[idx];
+      this.bwdArrTime[i] = rawArrTime[idx];
+      this.bwdTripIdx[i] = rawTripIdx[idx];
+    }
+  }
+
+  public async loadFromGTFSFiles(dataDir: string): Promise<boolean> {
+    const datasets = [
+      { folder: 'LINZ_AG_GTFS_2026', prefix: 'LINZ_' },
+      { folder: 'OOEVV_GTFS_2026', prefix: 'OOEVV_' }
+    ];
+
+    const resolvedDirs: Array<{ dir: string; prefix: string }> = [];
+    for (const ds of datasets) {
+      const dir = this.ensureDatasetExtracted(dataDir, ds.folder);
+      if (dir) resolvedDirs.push({ dir, prefix: ds.prefix });
+    }
+
+    if (resolvedDirs.length === 0) return false;
+
+    const latestMtime = this.getDatasetsLatestMtime(resolvedDirs.map(d => d.dir));
+    if (this.tryLoadFromDiskCache(dataDir, latestMtime)) {
+      return true;
+    }
+
+    console.log(`[CSA] Building routing graph directly from GTFS files in ${dataDir}...`);
+    console.time('[CSA] Direct GTFS build');
+
+    this.stopList = [];
+    this.stopIdToIdx.clear();
+    this.tripList = [];
+    this.tripIdToIdx.clear();
+    this.serviceList = [];
+    this.serviceIdToIdx.clear();
+
+    // Default catch-all service at index 0
+    this.serviceList.push({
+      id: '__ALL__',
+      daysMask: 0b1111111,
+      startDate: 19700101,
+      endDate: 20991231,
+      addedDates: new Set(),
+      removedDates: new Set()
+    });
+    this.serviceIdToIdx.set('__ALL__', 0);
+
+    const rawDepStop: number[] = [];
+    const rawArrStop: number[] = [];
+    const rawDepTime: number[] = [];
+    const rawArrTime: number[] = [];
+    const rawTripIdx: number[] = [];
+
+    for (const { dir, prefix } of resolvedDirs) {
+      // 1. Stops
+      await this.streamCSV(path.join(dir, 'stops.txt'), (row) => {
+        const id = prefix + row.stop_id;
+        const lat = parseFloat(row.stop_lat);
+        const lon = parseFloat(row.stop_lon);
+        if (!row.stop_id || Number.isNaN(lat) || Number.isNaN(lon)) return;
+        if (!this.stopIdToIdx.has(id)) {
+          const idx = this.stopList.length;
+          this.stopList.push({ id, name: row.stop_name || id, lat, lon, idx });
+          this.stopIdToIdx.set(id, idx);
+        }
+      });
+
+      // 2. Routes
+      const routeMap = new Map<string, { shortName: string; longName: string; type: number }>();
+      await this.streamCSV(path.join(dir, 'routes.txt'), (row) => {
+        if (!row.route_id) return;
+        const parsedType = parseInt(row.route_type, 10);
+        routeMap.set(prefix + row.route_id, {
+          shortName: row.route_short_name || '',
+          longName: row.route_long_name || '',
+          type: Number.isNaN(parsedType) ? 3 : parsedType
+        });
+      });
+
+      // 3. Calendar
+      await this.streamCSV(path.join(dir, 'calendar.txt'), (row) => {
+        if (!row.service_id) return;
+        const id = prefix + row.service_id;
+        let mask = 0;
+        if (row.sunday === '1') mask |= (1 << 0);
+        if (row.monday === '1') mask |= (1 << 1);
+        if (row.tuesday === '1') mask |= (1 << 2);
+        if (row.wednesday === '1') mask |= (1 << 3);
+        if (row.thursday === '1') mask |= (1 << 4);
+        if (row.friday === '1') mask |= (1 << 5);
+        if (row.saturday === '1') mask |= (1 << 6);
+
+        const startDate = parseInt(row.start_date, 10) || 19700101;
+        const endDate = parseInt(row.end_date, 10) || 20991231;
+
+        if (!this.serviceIdToIdx.has(id)) {
+          const idx = this.serviceList.length;
+          this.serviceList.push({
+            id,
+            daysMask: mask,
+            startDate,
+            endDate,
+            addedDates: new Set(),
+            removedDates: new Set()
+          });
+          this.serviceIdToIdx.set(id, idx);
+        }
+      });
+
+      // 4. Calendar dates (exceptions)
+      await this.streamCSV(path.join(dir, 'calendar_dates.txt'), (row) => {
+        if (!row.service_id || !row.date) return;
+        const id = prefix + row.service_id;
+        let svcIdx = this.serviceIdToIdx.get(id);
+        if (svcIdx === undefined) {
+          svcIdx = this.serviceList.length;
+          this.serviceList.push({
+            id,
+            daysMask: 0,
+            startDate: 19700101,
+            endDate: 20991231,
+            addedDates: new Set(),
+            removedDates: new Set()
+          });
+          this.serviceIdToIdx.set(id, svcIdx);
+        }
+        const dateInt = parseInt(row.date, 10);
+        if (Number.isNaN(dateInt)) return;
+        if (row.exception_type === '1') {
+          this.serviceList[svcIdx].addedDates.add(dateInt);
+        } else if (row.exception_type === '2') {
+          this.serviceList[svcIdx].removedDates.add(dateInt);
+        }
+      });
+
+      // 5. Trips
+      await this.streamCSV(path.join(dir, 'trips.txt'), (row) => {
+        if (!row.trip_id) return;
+        const id = prefix + row.trip_id;
+        const routeInfo = routeMap.get(prefix + row.route_id);
+        const svcIdx = this.serviceIdToIdx.get(prefix + row.service_id) ?? 0;
+        if (!this.tripIdToIdx.has(id)) {
+          const idx = this.tripList.length;
+          this.tripList.push({
+            id,
+            route_short_name: routeInfo?.shortName || '',
+            route_long_name: routeInfo?.longName || '',
+            route_type: routeInfo?.type ?? 3,
+            serviceIdx: svcIdx
+          });
+          this.tripIdToIdx.set(id, idx);
+        }
+      });
+
+      // 6. Stop times -> build consecutive connections per trip
+      const stopTimesByTrip = new Map<number, Array<{ seq: number; stopIdx: number; arr: number; dep: number }>>();
+      await this.streamCSV(path.join(dir, 'stop_times.txt'), (row) => {
+        const tripIdx = this.tripIdToIdx.get(prefix + row.trip_id);
+        const stopIdx = this.stopIdToIdx.get(prefix + row.stop_id);
+        if (tripIdx === undefined || stopIdx === undefined) return;
+        const seq = parseInt(row.stop_sequence, 10);
+        const arr = this.timeToSeconds(row.arrival_time);
+        const dep = this.timeToSeconds(row.departure_time);
+        if (Number.isNaN(seq) || arr === -1 || dep === -1) return;
+
+        let list = stopTimesByTrip.get(tripIdx);
+        if (!list) {
+          list = [];
+          stopTimesByTrip.set(tripIdx, list);
+        }
+        list.push({ seq, stopIdx, arr, dep });
+      });
+
+      for (const [tripIdx, list] of stopTimesByTrip.entries()) {
+        if (list.length < 2) continue;
+        list.sort((a, b) => a.seq - b.seq);
+        for (let i = 0; i < list.length - 1; i++) {
+          const st1 = list[i];
+          const st2 = list[i + 1];
+          rawDepStop.push(st1.stopIdx);
+          rawArrStop.push(st2.stopIdx);
+          rawDepTime.push(st1.dep);
+          rawArrTime.push(st2.arr);
+          rawTripIdx.push(tripIdx);
+        }
+      }
+      stopTimesByTrip.clear();
+    }
+
+    this.computeFootpaths();
+    this.buildTypedConnectionColumns(rawDepStop, rawArrStop, rawDepTime, rawArrTime, rawTripIdx);
+
+    this.activeServiceCache.clear();
+    this.ready = true;
+    console.timeEnd('[CSA] Direct GTFS build');
+    console.log(`[CSA] Direct GTFS graph ready. Stops: ${this.stopList.length}, Trips: ${this.tripList.length}, Services: ${this.serviceList.length}, Connections: ${this.numConnections}`);
+
+    this.saveToDiskCache(dataDir, latestMtime);
+    return true;
+  }
+
+  async loadGraph(driver?: Driver) {
+    console.time('[CSA] Total load time');
+    try {
+      const dataDir = this.resolveDataDir();
+      if (dataDir) {
+        const loadedDirect = await this.loadFromGTFSFiles(dataDir);
+        if (loadedDirect) {
+          return;
+        }
+      }
+
+      if (!driver) {
+        throw new Error('No local GTFS data found and no Neo4j driver provided');
+      }
+
+      console.log('[CSA] Falling back to loading graph from Neo4j...');
+      const session = driver.session();
+      try {
+        this.stopList = [];
+        this.stopIdToIdx.clear();
+        this.tripList = [];
+        this.tripIdToIdx.clear();
+        this.serviceList = [{
+          id: '__ALL__',
+          daysMask: 0b1111111,
+          startDate: 19700101,
+          endDate: 20991231,
+          addedDates: new Set(),
+          removedDates: new Set()
+        }];
+        this.serviceIdToIdx.set('__ALL__', 0);
+
+        const stopResult = await session.run(`MATCH (s:Stop) RETURN s.id as id, s.name as name, s.latitude as lat, s.longitude as lon`);
+        for (const record of stopResult.records) {
+          const id = record.get('id');
+          if (!this.stopIdToIdx.has(id)) {
+            const idx = this.stopList.length;
+            this.stopList.push({
+              id,
+              name: record.get('name'),
+              lat: record.get('lat'),
+              lon: record.get('lon'),
+              idx
+            });
+            this.stopIdToIdx.set(id, idx);
           }
         }
-        this.footpaths.set(s1.id, paths);
-      }
-      console.timeEnd('[CSA] Compute Footpaths');
 
-      console.time('[CSA] Load Trips');
-      const tripResult = await session.run(`
-        MATCH (t:Trip)-[:ON_ROUTE]->(r:Route) 
-        RETURN t.id as id, r.short_name as short_name, r.long_name as long_name, r.type as type
-      `);
-      for (const record of tripResult.records) {
-        const rawType = record.get('type');
-        this.trips.set(record.get('id'), {
-          id: record.get('id'),
-          route_short_name: record.get('short_name') || '',
-          route_long_name: record.get('long_name') || '',
-          route_type: (rawType !== null && rawType !== undefined) ? (typeof rawType.toNumber === 'function' ? rawType.toNumber() : Number(rawType)) : 3
-        });
-      }
-      console.timeEnd('[CSA] Load Trips');
+        this.computeFootpaths();
 
-      console.time('[CSA] Load Connections');
-      const connResult = await session.run(`
-        MATCH (st1:StopTime)-[:NEXT_STOP]->(st2:StopTime)
-        RETURN st1.stop_id as dep_stop, st2.stop_id as arr_stop, 
-               st1.departure_time as dep_time, st2.arrival_time as arr_time, 
-               st1.trip_id as trip_id
-      `);
-      
-      const conns: Connection[] = [];
-      for (const record of connResult.records) {
-        const depTime = this.timeToSeconds(record.get('dep_time'));
-        const arrTime = this.timeToSeconds(record.get('arr_time'));
-        if (depTime !== -1 && arrTime !== -1) {
-          conns.push({
-            departure_stop: record.get('dep_stop'),
-            arrival_stop: record.get('arr_stop'),
-            departure_time: depTime,
-            arrival_time: arrTime,
-            trip_id: record.get('trip_id')
+        const svcResult = await session.run(`
+          MATCH (s:Service)
+          RETURN s.id as id, s.sunday as sun, s.monday as mon, s.tuesday as tue,
+                 s.wednesday as wed, s.thursday as thu, s.friday as fri, s.saturday as sat,
+                 s.start_date as start_date, s.end_date as end_date
+        `);
+        for (const record of svcResult.records) {
+          const id = record.get('id');
+          if (!id || this.serviceIdToIdx.has(id)) continue;
+          let mask = 0;
+          if (record.get('sun')) mask |= (1 << 0);
+          if (record.get('mon')) mask |= (1 << 1);
+          if (record.get('tue')) mask |= (1 << 2);
+          if (record.get('wed')) mask |= (1 << 3);
+          if (record.get('thu')) mask |= (1 << 4);
+          if (record.get('fri')) mask |= (1 << 5);
+          if (record.get('sat')) mask |= (1 << 6);
+          const idx = this.serviceList.length;
+          this.serviceList.push({
+            id,
+            daysMask: mask,
+            startDate: parseInt(record.get('start_date'), 10) || 19700101,
+            endDate: parseInt(record.get('end_date'), 10) || 20991231,
+            addedDates: new Set(),
+            removedDates: new Set()
           });
+          this.serviceIdToIdx.set(id, idx);
         }
+
+        const tripResult = await session.run(`
+          MATCH (t:Trip)-[:ON_ROUTE]->(r:Route)
+          RETURN t.id as id, t.service_id as service_id, r.short_name as short_name, r.long_name as long_name, r.type as type
+        `);
+        for (const record of tripResult.records) {
+          const id = record.get('id');
+          if (this.tripIdToIdx.has(id)) continue;
+          const rawType = record.get('type');
+          const svcId = record.get('service_id');
+          const idx = this.tripList.length;
+          this.tripList.push({
+            id,
+            route_short_name: record.get('short_name') || '',
+            route_long_name: record.get('long_name') || '',
+            route_type: (rawType !== null && rawType !== undefined) ? (typeof rawType.toNumber === 'function' ? rawType.toNumber() : Number(rawType)) : 3,
+            serviceIdx: (svcId && this.serviceIdToIdx.get(svcId)) ?? 0
+          });
+          this.tripIdToIdx.set(id, idx);
+        }
+
+        const connResult = await session.run(`
+          MATCH (st1:StopTime)-[:NEXT_STOP]->(st2:StopTime)
+          RETURN st1.stop_id as dep_stop, st2.stop_id as arr_stop,
+                 st1.departure_time as dep_time, st2.arrival_time as arr_time,
+                 st1.trip_id as trip_id
+        `);
+
+        const rawDepStop: number[] = [];
+        const rawArrStop: number[] = [];
+        const rawDepTime: number[] = [];
+        const rawArrTime: number[] = [];
+        const rawTripIdx: number[] = [];
+
+        for (const record of connResult.records) {
+          const depStopIdx = this.stopIdToIdx.get(record.get('dep_stop'));
+          const arrStopIdx = this.stopIdToIdx.get(record.get('arr_stop'));
+          const tripIdx = this.tripIdToIdx.get(record.get('trip_id'));
+          const depTime = this.timeToSeconds(record.get('dep_time'));
+          const arrTime = this.timeToSeconds(record.get('arr_time'));
+          if (depStopIdx !== undefined && arrStopIdx !== undefined && tripIdx !== undefined && depTime !== -1 && arrTime !== -1) {
+            rawDepStop.push(depStopIdx);
+            rawArrStop.push(arrStopIdx);
+            rawDepTime.push(depTime);
+            rawArrTime.push(arrTime);
+            rawTripIdx.push(tripIdx);
+          }
+        }
+
+        this.buildTypedConnectionColumns(rawDepStop, rawArrStop, rawDepTime, rawArrTime, rawTripIdx);
+        this.activeServiceCache.clear();
+        this.ready = true;
+        console.log(`[CSA] Graph loaded from Neo4j. Stops: ${this.stopList.length}, Trips: ${this.tripList.length}, Connections: ${this.numConnections}`);
+      } finally {
+        await session.close();
       }
-      
-      console.log(`[CSA] Sorting ${conns.length} connections...`);
-      conns.sort((a, b) => a.departure_time - b.departure_time);
-      this.connections = conns;
-      this.backwardConnections = [...conns].sort((a, b) => b.arrival_time - a.arrival_time);
-      console.timeEnd('[CSA] Load Connections');
-      
-      this.ready = true;
-      console.log(`[CSA] Graph loaded successfully. Stops: ${this.stops.size}, Trips: ${this.trips.size}, Connections: ${this.connections.length}`);
     } finally {
-      await session.close();
       console.timeEnd('[CSA] Total load time');
     }
   }
 
+  public getActiveServiceMask(targetDate?: Date | string): Uint8Array {
+    let dateObj: Date;
+    if (typeof targetDate === 'string' && /^\d{8}$/.test(targetDate)) {
+      const y = parseInt(targetDate.slice(0, 4), 10);
+      const m = parseInt(targetDate.slice(4, 6), 10) - 1;
+      const d = parseInt(targetDate.slice(6, 8), 10);
+      dateObj = new Date(y, m, d, 12, 0, 0);
+    } else if (targetDate instanceof Date) {
+      dateObj = targetDate;
+    } else {
+      const now = new Date();
+      dateObj = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Vienna' }));
+    }
+
+    const yyyy = dateObj.getFullYear();
+    const mm = dateObj.getMonth() + 1;
+    const dd = dateObj.getDate();
+    const dateInt = yyyy * 10000 + mm * 100 + dd;
+    const dayBit = 1 << dateObj.getDay();
+
+    const cached = this.activeServiceCache.get(dateInt);
+    if (cached) return cached;
+
+    const numServices = this.serviceList.length;
+    const active = new Uint8Array(numServices);
+    active[0] = 1; // __ALL__
+
+    let matchedCount = 0;
+    for (let i = 1; i < numServices; i++) {
+      const sv = this.serviceList[i];
+      if (sv.removedDates.has(dateInt)) {
+        active[i] = 0;
+        continue;
+      }
+      if (sv.addedDates.has(dateInt)) {
+        active[i] = 1;
+        matchedCount++;
+        continue;
+      }
+      if (dateInt >= sv.startDate && dateInt <= sv.endDate && (sv.daysMask & dayBit) !== 0) {
+        active[i] = 1;
+        matchedCount++;
+      }
+    }
+
+    // Fallback 1: if system date is outside the GTFS calendar window, match by day-of-week only
+    if (matchedCount === 0 && numServices > 1) {
+      for (let i = 1; i < numServices; i++) {
+        if ((this.serviceList[i].daysMask & dayBit) !== 0) {
+          active[i] = 1;
+          matchedCount++;
+        }
+      }
+    }
+
+    // Fallback 2: if still 0 (e.g., empty calendar), enable all services
+    if (matchedCount === 0) {
+      active.fill(1);
+    }
+
+    this.activeServiceCache.set(dateInt, active);
+    return active;
+  }
+
   private getDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
     const R = 6371e3;
-    const phi1 = lat1 * Math.PI/180;
-    const phi2 = lat2 * Math.PI/180;
-    const deltaPhi = (lat2-lat1) * Math.PI/180;
-    const deltaLambda = (lon2-lon1) * Math.PI/180;
+    const phi1 = lat1 * Math.PI / 180;
+    const phi2 = lat2 * Math.PI / 180;
+    const deltaPhi = (lat2 - lat1) * Math.PI / 180;
+    const deltaLambda = (lon2 - lon1) * Math.PI / 180;
 
-    const a = Math.sin(deltaPhi/2) * Math.sin(deltaPhi/2) +
+    const a = Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2) +
               Math.cos(phi1) * Math.cos(phi2) *
-              Math.sin(deltaLambda/2) * Math.sin(deltaLambda/2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+              Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
     return Math.round(R * c);
   }
 
-  private findStopsWithinRadius(lat: number, lon: number, maxMeters: number): Array<{stop: StopData, walkTime: number}> {
+  public findStopsWithinRadius(lat: number, lon: number, maxMeters: number): Array<{ stop: StopData; walkTime: number }> {
     const WALK_SPEED_M_S = 1.4;
-    const results = [];
-    for (const stop of this.stops.values()) {
+    // Bounding-box pre-filter (~111km per deg lat, ~74km per deg lon at 48°N, with 20% safety margin)
+    const latDelta = (maxMeters / 111000) * 1.2;
+    const lonDelta = (maxMeters / 70000) * 1.2;
+
+    const results: Array<{ stop: StopData; walkTime: number }> = [];
+    const n = this.stopList.length;
+
+    for (let i = 0; i < n; i++) {
+      const stop = this.stopList[i];
+      if (Math.abs(stop.lat - lat) > latDelta || Math.abs(stop.lon - lon) > lonDelta) {
+        continue;
+      }
       const dist = this.getDistanceMeters(lat, lon, stop.lat, stop.lon);
       if (dist <= maxMeters) {
         results.push({ stop, walkTime: Math.round(dist / WALK_SPEED_M_S) });
       }
     }
-    if (results.length === 0) {
+
+    if (results.length === 0 && n > 0) {
       let nearest: StopData | null = null;
       let minDist = Infinity;
-      for (const stop of this.stops.values()) {
+      for (let i = 0; i < n; i++) {
+        const stop = this.stopList[i];
         const dist = this.getDistanceMeters(lat, lon, stop.lat, stop.lon);
-        if (dist < minDist) { minDist = dist; nearest = stop; }
+        if (dist < minDist) {
+          minDist = dist;
+          nearest = stop;
+        }
       }
-      if (nearest) { results.push({ stop: nearest, walkTime: Math.round(minDist / WALK_SPEED_M_S) }); }
+      if (nearest) {
+        results.push({ stop: nearest, walkTime: Math.round(minDist / WALK_SPEED_M_S) });
+      }
     }
+
     return results;
   }
 
-  findRoute(startLat: number, startLon: number, endLat: number, endLon: number, startTimeStr: string): any {
-    if (!this.ready) throw new Error("CSA Router not initialized");
+  /**
+   * Binary search for first index i in fwdDepTime where fwdDepTime[i] >= startTime
+   */
+  public findFirstDepartureIndex(startTime: number): number {
+    const arr = this.fwdDepTime;
+    let lo = 0;
+    let hi = this.numConnections;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (arr[mid] < startTime) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
+    return lo;
+  }
+
+  /**
+   * Binary search for first index i in bwdArrTime (sorted descending) where bwdArrTime[i] <= targetTime
+   */
+  public findFirstArrivalReverseIndex(targetTime: number): number {
+    const arr = this.bwdArrTime;
+    let lo = 0;
+    let hi = this.numConnections;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (arr[mid] > targetTime) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
+    return lo;
+  }
+
+  findRoute(startLat: number, startLon: number, endLat: number, endLon: number, startTimeStr: string, targetDate?: Date | string): any {
+    if (!this.ready) throw new Error('CSA Router not initialized');
 
     const startTime = this.timeToSeconds(startTimeStr);
     const MAX_WALK_METERS = 1500;
     const TRANSFER_PENALTY = 120; // 2 minutes added to footpaths to penalize transfers
-    
+    const INF = 0x3fffffff;
+
     const directWalkDist = this.getDistanceMeters(startLat, startLon, endLat, endLon);
     const directWalkTime = Math.round(directWalkDist / 1.4);
 
     const startStops = this.findStopsWithinRadius(startLat, startLon, MAX_WALK_METERS);
     const endStops = this.findStopsWithinRadius(endLat, endLon, MAX_WALK_METERS);
 
-    if (startStops.length === 0 || endStops.length === 0) { return []; }
-
-    const earliestArrival = new Map<string, { time: number, transfers: number }>();
-    const inConnection = new Map<string, any>(); 
-    const tripReached = new Set<string>();
-    const walkToStart = new Map<string, number>();
-
-    // NEW MAPS for correct reconstruction
-    const tripBoardStop = new Map<string, string>();
-    const tripPrevConnection = new Map<string, any>();
-
-    for (const stop of this.stops.keys()) {
-      earliestArrival.set(stop, { time: Infinity, transfers: Infinity });
+    if (startStops.length === 0 || endStops.length === 0) {
+      return [];
     }
-    
-    for (const { stop, walkTime } of startStops) {
-      const arr = startTime + walkTime;
-      const existing = earliestArrival.get(stop.id)!;
-      if (arr < existing.time) {
-        earliestArrival.set(stop.id, { time: arr, transfers: 0 });
-        walkToStart.set(stop.id, walkTime);
+
+    const numStops = this.stopList.length;
+    const numTrips = this.tripList.length;
+    const activeService = this.getActiveServiceMask(targetDate);
+
+    const earliestArrivalTime = new Int32Array(numStops).fill(INF);
+    const earliestArrivalTransfers = new Int32Array(numStops).fill(INF);
+    const walkToStart = new Int32Array(numStops).fill(-1);
+    const endStopWalk = new Int32Array(numStops).fill(-1);
+    const tripBoardStop = new Int32Array(numTrips).fill(-1);
+
+    const inConnection = new Map<number, any>();
+    const tripPrevConnection = new Map<number, number>(); // key: tripIdx * numStops + arrStopIdx -> connIdx
+
+    for (let i = 0; i < endStops.length; i++) {
+      const { stop, walkTime } = endStops[i];
+      if (endStopWalk[stop.idx] === -1 || walkTime < endStopWalk[stop.idx]) {
+        endStopWalk[stop.idx] = walkTime;
       }
     }
 
-    let connsEvaluated = 0;
-    for (const c of this.connections) {
-      if (c.departure_time < startTime) continue;
-      connsEvaluated++;
-      
-      const depStopId = c.departure_stop;
-      const arrStopId = c.arrival_stop;
+    let bestTotalTime = INF;
+    let bestEndStopIdx = -1;
+    let finalWalkTime = 0;
 
-      const depState = earliestArrival.get(depStopId)!;
-      const wasReached = tripReached.has(c.trip_id);
-      const canTake = depState.time <= c.departure_time || wasReached;
-
-      if (canTake) {
-        // Mark trip as reached and save first boarding stop
-        tripReached.add(c.trip_id);
-        if (tripBoardStop.get(c.trip_id) === undefined) {
-          tripBoardStop.set(c.trip_id, c.departure_stop);
+    for (let i = 0; i < startStops.length; i++) {
+      const { stop, walkTime } = startStops[i];
+      const arr = startTime + walkTime;
+      if (arr < earliestArrivalTime[stop.idx]) {
+        earliestArrivalTime[stop.idx] = arr;
+        earliestArrivalTransfers[stop.idx] = 0;
+        walkToStart[stop.idx] = walkTime;
+        const ew = endStopWalk[stop.idx];
+        if (ew !== -1 && arr + ew < bestTotalTime) {
+          bestTotalTime = arr + ew;
+          bestEndStopIdx = stop.idx;
+          finalWalkTime = ew;
         }
-        tripPrevConnection.set(c.trip_id + '_' + c.arrival_stop, c);
+      }
+    }
 
-        const arrState = earliestArrival.get(arrStopId)!;
-        const newTransfers = wasReached ? depState.transfers : depState.transfers + 1;
-        if (c.arrival_time < arrState.time || (c.arrival_time === arrState.time && newTransfers < arrState.transfers)) {
-          earliestArrival.set(arrStopId, { time: c.arrival_time, transfers: newTransfers });
-          inConnection.set(arrStopId, c);
+    const startIdx = this.findFirstDepartureIndex(startTime);
+    const n = this.numConnections;
+    const fwdDepStop = this.fwdDepStop;
+    const fwdArrStop = this.fwdArrStop;
+    const fwdDepTime = this.fwdDepTime;
+    const fwdArrTime = this.fwdArrTime;
+    const fwdTripIdx = this.fwdTripIdx;
+    const tripList = this.tripList;
+    const footpathsByStopIdx = this.footpathsByStopIdx;
 
-          const paths = this.footpaths.get(arrStopId) || [];
-          for (const fp of paths) {
-            if (fp.from === fp.to) continue;
-            const walkArr = c.arrival_time + fp.walkTime + TRANSFER_PENALTY;
-            const fpState = earliestArrival.get(fp.to)!;
-            if (walkArr < fpState.time || (walkArr === fpState.time && newTransfers + 1 < fpState.transfers)) {
-              earliestArrival.set(fp.to, { time: walkArr, transfers: newTransfers + 1 });
-              inConnection.set(fp.to, { type: 'footpath', from: fp.from, to: fp.to, walkTime: fp.walkTime, connectionTime: c.arrival_time });
+    for (let i = startIdx; i < n; i++) {
+      const depTime = fwdDepTime[i];
+      if (depTime > bestTotalTime) {
+        break; // Early exit: sorted by departure_time, no subsequent connection can arrive before bestTotalTime
+      }
+
+      const tripIdx = fwdTripIdx[i];
+      if (activeService[tripList[tripIdx].serviceIdx] === 0) {
+        continue;
+      }
+
+      const depStopIdx = fwdDepStop[i];
+      const depArrTime = earliestArrivalTime[depStopIdx];
+      const wasReached = tripBoardStop[tripIdx] !== -1;
+
+      if (depArrTime <= depTime || wasReached) {
+        if (!wasReached) {
+          tripBoardStop[tripIdx] = depStopIdx;
+        }
+        const arrStopIdx = fwdArrStop[i];
+        tripPrevConnection.set(tripIdx * numStops + arrStopIdx, i);
+
+        const arrTime = fwdArrTime[i];
+        const newTransfers = wasReached ? earliestArrivalTransfers[depStopIdx] : earliestArrivalTransfers[depStopIdx] + 1;
+        const curArrTime = earliestArrivalTime[arrStopIdx];
+
+        if (arrTime < curArrTime || (arrTime === curArrTime && newTransfers < earliestArrivalTransfers[arrStopIdx])) {
+          earliestArrivalTime[arrStopIdx] = arrTime;
+          earliestArrivalTransfers[arrStopIdx] = newTransfers;
+          inConnection.set(arrStopIdx, i);
+
+          const ew = endStopWalk[arrStopIdx];
+          if (ew !== -1 && arrTime + ew < bestTotalTime) {
+            bestTotalTime = arrTime + ew;
+            bestEndStopIdx = arrStopIdx;
+            finalWalkTime = ew;
+          }
+
+          const paths = footpathsByStopIdx[arrStopIdx];
+          for (let p = 0; p < paths.length; p++) {
+            const fp = paths[p];
+            const walkArr = arrTime + fp.walkTime + TRANSFER_PENALTY;
+            const fpTo = fp.toIdx;
+            const fpCurTime = earliestArrivalTime[fpTo];
+            if (walkArr < fpCurTime || (walkArr === fpCurTime && newTransfers + 1 < earliestArrivalTransfers[fpTo])) {
+              earliestArrivalTime[fpTo] = walkArr;
+              earliestArrivalTransfers[fpTo] = newTransfers + 1;
+              inConnection.set(fpTo, {
+                type: 'footpath',
+                fromIdx: arrStopIdx,
+                toIdx: fpTo,
+                walkTime: fp.walkTime,
+                connectionTime: arrTime
+              });
+
+              const fpEw = endStopWalk[fpTo];
+              if (fpEw !== -1 && walkArr + fpEw < bestTotalTime) {
+                bestTotalTime = walkArr + fpEw;
+                bestEndStopIdx = fpTo;
+                finalWalkTime = fpEw;
+              }
             }
           }
         }
       }
     }
 
-    let bestTotalTime = Infinity;
-    let bestEndStopId: string | null = null;
-    let finalWalkTime = 0;
-
-    for (const { stop, walkTime } of endStops) {
-      const arr = earliestArrival.get(stop.id)!.time;
-      if (arr !== Infinity) {
-        const total = arr + walkTime;
-        if (total < bestTotalTime) {
-          bestTotalTime = total;
-          bestEndStopId = stop.id;
-          finalWalkTime = walkTime;
-        }
-      }
-    }
-
-    // Check if any transit route was found BEFORE comparing with walking
-    if (bestTotalTime === Infinity || !bestEndStopId) {
-      // No transit found — only offer walking if the distance is reasonable (< 3km)
+    if (bestTotalTime === INF || bestEndStopIdx === -1) {
       const MAX_WALK_ONLY_METERS = 3000;
       if (directWalkDist <= MAX_WALK_ONLY_METERS) {
         const arrTime = startTime + directWalkTime;
@@ -297,7 +1060,6 @@ export class CSARouter {
       return [];
     }
 
-    // Transit route found — check if walking is genuinely faster
     const transitTotalTime = bestTotalTime - startTime;
     if (directWalkTime < transitTotalTime) {
       const arrTime = startTime + directWalkTime;
@@ -318,45 +1080,56 @@ export class CSARouter {
       }];
     }
 
-    const rawPath = [];
-    let currentStopId = bestEndStopId;
-    let currentItem = inConnection.get(currentStopId);
-    
-    while (currentItem) {
-      if (currentItem.type === 'footpath') {
+    const rawPath: Array<any> = [];
+    let currentStopIdx = bestEndStopIdx;
+    let currentItem = inConnection.get(currentStopIdx);
+
+    while (currentItem !== undefined) {
+      if (typeof currentItem === 'object' && currentItem.type === 'footpath') {
         rawPath.unshift(currentItem);
-        currentStopId = currentItem.from;
-        currentItem = inConnection.get(currentStopId);
+        currentStopIdx = currentItem.fromIdx;
+        currentItem = inConnection.get(currentStopIdx);
       } else {
-        const tripId = currentItem.trip_id;
-        const boardStopId = tripBoardStop.get(tripId)!;
-        
-        let tempStop = currentStopId;
+        const connIdx = currentItem as number;
+        const tripIdx = fwdTripIdx[connIdx];
+        const boardStopIdx = tripBoardStop[tripIdx];
+
+        let tempStop = currentStopIdx;
         let count = 0;
-        while (tempStop !== boardStopId) {
-          const conn = tripPrevConnection.get(tripId + '_' + tempStop);
-          if (!conn) break;
-          rawPath.unshift(conn);
-          tempStop = conn.departure_stop;
+        while (tempStop !== boardStopIdx) {
+          const cIdx = tripPrevConnection.get(tripIdx * numStops + tempStop);
+          if (cIdx === undefined) break;
+          rawPath.unshift({
+            type: 'conn',
+            depStopIdx: fwdDepStop[cIdx],
+            arrStopIdx: fwdArrStop[cIdx],
+            depTime: fwdDepTime[cIdx],
+            arrTime: fwdArrTime[cIdx],
+            tripIdx: fwdTripIdx[cIdx]
+          });
+          tempStop = fwdDepStop[cIdx];
           count++;
           if (count > 100) break;
         }
-        currentStopId = boardStopId;
-        currentItem = inConnection.get(currentStopId);
+        currentStopIdx = boardStopIdx;
+        currentItem = inConnection.get(currentStopIdx);
       }
       if (rawPath.length > 200) break;
     }
 
-    const groupedLegs = [];
-    
-    const firstTransitStopId = rawPath.length > 0 ? (rawPath[0].type === 'footpath' ? rawPath[0].from : rawPath[0].departure_stop) : bestEndStopId;
-    const initialWalk = walkToStart.get(firstTransitStopId);
-    if (initialWalk && initialWalk > 0) {
+    const groupedLegs: any[] = [];
+    const firstTransitStopIdx = rawPath.length > 0
+      ? (rawPath[0].type === 'footpath' ? rawPath[0].fromIdx : rawPath[0].depStopIdx)
+      : bestEndStopIdx;
+    const initialWalk = walkToStart[firstTransitStopIdx];
+
+    if (initialWalk > 0) {
+      const firstStop = this.stopList[firstTransitStopIdx];
       groupedLegs.push({
         board_stop_id: 'START',
         board_stop_name: 'Origin',
-        alight_stop_id: firstTransitStopId,
-        alight_stop_name: this.stops.get(firstTransitStopId)?.name || '',
+        alight_stop_id: firstStop.id,
+        alight_stop_name: firstStop.name,
         departure_time: this.secondsToTime(startTime),
         arrival_time: this.secondsToTime(startTime + initialWalk),
         route_short_name: 'Walk',
@@ -366,34 +1139,42 @@ export class CSARouter {
       });
     }
 
+    const pushTransitLeg = (startLeg: any, lastLeg: any, tripIdx: number) => {
+      const tripInfo = this.tripList[tripIdx];
+      const boardStop = this.stopList[startLeg.depStopIdx];
+      const alightStop = this.stopList[lastLeg.arrStopIdx];
+      groupedLegs.push({
+        board_stop_id: boardStop.id,
+        board_stop_name: boardStop.name,
+        alight_stop_id: alightStop.id,
+        alight_stop_name: alightStop.name,
+        departure_time: this.secondsToTime(startLeg.depTime),
+        arrival_time: this.secondsToTime(lastLeg.arrTime),
+        route_short_name: tripInfo.route_short_name,
+        route_long_name: tripInfo.route_long_name,
+        route_type: tripInfo.route_type
+      });
+    };
+
     if (rawPath.length > 0) {
-      let currentTrip = rawPath[0].trip_id;
+      let currentTrip: number | null = rawPath[0].type === 'conn' ? rawPath[0].tripIdx : null;
       let startLeg = rawPath[0];
       let lastLeg = rawPath[0];
 
       for (let i = 1; i < rawPath.length; i++) {
         const item = rawPath[i];
         if (item.type === 'footpath') {
-          if (currentTrip) {
-            const tripInfo = this.trips.get(currentTrip)!;
-            groupedLegs.push({
-              board_stop_id: startLeg.departure_stop,
-              board_stop_name: this.stops.get(startLeg.departure_stop)?.name || '',
-              alight_stop_id: lastLeg.arrival_stop,
-              alight_stop_name: this.stops.get(lastLeg.arrival_stop)?.name || '',
-              departure_time: this.secondsToTime(startLeg.departure_time),
-              arrival_time: this.secondsToTime(lastLeg.arrival_time),
-              route_short_name: tripInfo.route_short_name,
-              route_long_name: tripInfo.route_long_name,
-              route_type: tripInfo.route_type
-            });
+          if (currentTrip !== null) {
+            pushTransitLeg(startLeg, lastLeg, currentTrip);
             currentTrip = null;
           }
+          const fromStop = this.stopList[item.fromIdx];
+          const toStop = this.stopList[item.toIdx];
           groupedLegs.push({
-            board_stop_id: item.from,
-            board_stop_name: this.stops.get(item.from)?.name || '',
-            alight_stop_id: item.to,
-            alight_stop_name: this.stops.get(item.to)?.name || '',
+            board_stop_id: fromStop.id,
+            board_stop_name: fromStop.name,
+            alight_stop_id: toStop.id,
+            alight_stop_name: toStop.name,
             departure_time: this.secondsToTime(item.connectionTime),
             arrival_time: this.secondsToTime(item.connectionTime + item.walkTime),
             route_short_name: 'Walk',
@@ -402,50 +1183,32 @@ export class CSARouter {
             distance: Math.round(item.walkTime * 1.4)
           });
         } else {
-          if (item.trip_id === currentTrip) {
+          if (item.tripIdx === currentTrip) {
             lastLeg = item;
           } else {
-            if (currentTrip) {
-              const tripInfo = this.trips.get(currentTrip)!;
-              groupedLegs.push({
-                board_stop_id: startLeg.departure_stop,
-                board_stop_name: this.stops.get(startLeg.departure_stop)?.name || '',
-                alight_stop_id: lastLeg.arrival_stop,
-                alight_stop_name: this.stops.get(lastLeg.arrival_stop)?.name || '',
-                departure_time: this.secondsToTime(startLeg.departure_time),
-                arrival_time: this.secondsToTime(lastLeg.arrival_time),
-                route_short_name: tripInfo.route_short_name,
-                route_long_name: tripInfo.route_long_name,
-                route_type: tripInfo.route_type
-              });
+            if (currentTrip !== null) {
+              pushTransitLeg(startLeg, lastLeg, currentTrip);
             }
-            currentTrip = item.trip_id;
+            currentTrip = item.tripIdx;
             startLeg = item;
             lastLeg = item;
           }
         }
       }
-      if (currentTrip) {
-        const tripInfo = this.trips.get(currentTrip)!;
-        groupedLegs.push({
-          board_stop_id: startLeg.departure_stop,
-          board_stop_name: this.stops.get(startLeg.departure_stop)?.name || '',
-          alight_stop_id: lastLeg.arrival_stop,
-          alight_stop_name: this.stops.get(lastLeg.arrival_stop)?.name || '',
-          departure_time: this.secondsToTime(startLeg.departure_time),
-          arrival_time: this.secondsToTime(lastLeg.arrival_time),
-          route_short_name: tripInfo.route_short_name,
-          route_long_name: tripInfo.route_long_name,
-          route_type: tripInfo.route_type
-        });
+      if (currentTrip !== null) {
+        pushTransitLeg(startLeg, lastLeg, currentTrip);
       }
     }
 
     if (finalWalkTime > 0) {
-      const lastArrivalTime = earliestArrival.get(bestEndStopId)!.time;
+      const lastArrivalTime = earliestArrivalTime[bestEndStopIdx];
+      const endStop = this.stopList[bestEndStopIdx];
+      const boardStopIdx = rawPath.length > 0
+        ? (rawPath[rawPath.length - 1].type === 'footpath' ? rawPath[rawPath.length - 1].toIdx : rawPath[rawPath.length - 1].arrStopIdx)
+        : bestEndStopIdx;
       groupedLegs.push({
-        board_stop_id: rawPath.length > 0 ? (rawPath[rawPath.length - 1].type === 'footpath' ? rawPath[rawPath.length - 1].to : rawPath[rawPath.length - 1].arrival_stop) : bestEndStopId,
-        board_stop_name: this.stops.get(bestEndStopId)?.name || '',
+        board_stop_id: this.stopList[boardStopIdx].id,
+        board_stop_name: endStop.name,
         alight_stop_id: 'END',
         alight_stop_name: 'Destination',
         departure_time: this.secondsToTime(lastArrivalTime),
@@ -466,104 +1229,144 @@ export class CSARouter {
     }];
   }
 
-  findReverseRoute(startLat: number, startLon: number, endLat: number, endLon: number, targetTimeStr: string): any {
-    if (!this.ready) throw new Error("CSA Router not initialized");
+  findReverseRoute(startLat: number, startLon: number, endLat: number, endLon: number, targetTimeStr: string, targetDate?: Date | string): any {
+    if (!this.ready) throw new Error('CSA Router not initialized');
 
     const targetTime = this.timeToSeconds(targetTimeStr);
     const MAX_WALK_METERS = 1500;
     const TRANSFER_PENALTY = 120;
-    
+    const NEG_INF = -0x3fffffff;
+    const INF = 0x3fffffff;
+
     const directWalkDist = this.getDistanceMeters(startLat, startLon, endLat, endLon);
     const directWalkTime = Math.round(directWalkDist / 1.4);
 
     const startStops = this.findStopsWithinRadius(startLat, startLon, MAX_WALK_METERS);
     const endStops = this.findStopsWithinRadius(endLat, endLon, MAX_WALK_METERS);
 
-    if (startStops.length === 0 || endStops.length === 0) { return []; }
-
-    const latestDeparture = new Map<string, { time: number, transfers: number }>();
-    const outConnection = new Map<string, any>();
-    const tripReached = new Set<string>();
-    const walkToEnd = new Map<string, number>();
-
-    // NEW MAPS for correct reconstruction
-    const tripAlightStop = new Map<string, string>();
-    const tripNextConnection = new Map<string, any>();
-
-    for (const stop of this.stops.keys()) {
-      latestDeparture.set(stop, { time: -Infinity, transfers: Infinity });
+    if (startStops.length === 0 || endStops.length === 0) {
+      return [];
     }
-    
-    for (const { stop, walkTime } of endStops) {
-      const dep = targetTime - walkTime;
-      const existing = latestDeparture.get(stop.id)!;
-      if (dep > existing.time) {
-        latestDeparture.set(stop.id, { time: dep, transfers: 0 });
-        walkToEnd.set(stop.id, walkTime);
+
+    const numStops = this.stopList.length;
+    const numTrips = this.tripList.length;
+    const activeService = this.getActiveServiceMask(targetDate);
+
+    const latestDepartureTime = new Int32Array(numStops).fill(NEG_INF);
+    const latestDepartureTransfers = new Int32Array(numStops).fill(INF);
+    const walkToEnd = new Int32Array(numStops).fill(-1);
+    const startStopWalk = new Int32Array(numStops).fill(-1);
+    const tripAlightStop = new Int32Array(numTrips).fill(-1);
+
+    const outConnection = new Map<number, any>();
+    const tripNextConnection = new Map<number, number>(); // key: tripIdx * numStops + depStopIdx -> connIdx
+
+    for (let i = 0; i < startStops.length; i++) {
+      const { stop, walkTime } = startStops[i];
+      if (startStopWalk[stop.idx] === -1 || walkTime < startStopWalk[stop.idx]) {
+        startStopWalk[stop.idx] = walkTime;
       }
     }
 
-    for (const c of this.backwardConnections) {
-      if (c.arrival_time > targetTime) continue;
-      
-      // Save the connection for hop-by-hop traversal
-      tripNextConnection.set(c.trip_id + '_' + c.departure_stop, c);
+    let bestTotalTime = NEG_INF;
+    let bestStartStopIdx = -1;
+    let initialWalkTime = 0;
 
-      const depStopId = c.departure_stop;
-      const arrStopId = c.arrival_stop;
-
-      const arrState = latestDeparture.get(arrStopId)!;
-      const wasReached = tripReached.has(c.trip_id);
-      const canTake = arrState.time >= c.arrival_time || wasReached;
-
-      if (canTake) {
-        // Mark trip as reached and save first alight stop
-        tripReached.add(c.trip_id);
-        if (tripAlightStop.get(c.trip_id) === undefined) {
-          tripAlightStop.set(c.trip_id, arrStopId);
+    for (let i = 0; i < endStops.length; i++) {
+      const { stop, walkTime } = endStops[i];
+      const dep = targetTime - walkTime;
+      if (dep > latestDepartureTime[stop.idx]) {
+        latestDepartureTime[stop.idx] = dep;
+        latestDepartureTransfers[stop.idx] = 0;
+        walkToEnd[stop.idx] = walkTime;
+        const sw = startStopWalk[stop.idx];
+        if (sw !== -1 && dep - sw > bestTotalTime) {
+          bestTotalTime = dep - sw;
+          bestStartStopIdx = stop.idx;
+          initialWalkTime = sw;
         }
+      }
+    }
 
-        const depState = latestDeparture.get(depStopId)!;
-        const newTransfers = wasReached ? arrState.transfers : arrState.transfers + 1;
-        if (c.departure_time > depState.time || (c.departure_time === depState.time && newTransfers < depState.transfers)) {
-          latestDeparture.set(depStopId, { time: c.departure_time, transfers: newTransfers });
-          outConnection.set(depStopId, c);
+    const startIdx = this.findFirstArrivalReverseIndex(targetTime);
+    const n = this.numConnections;
+    const bwdDepStop = this.bwdDepStop;
+    const bwdArrStop = this.bwdArrStop;
+    const bwdDepTime = this.bwdDepTime;
+    const bwdArrTime = this.bwdArrTime;
+    const bwdTripIdx = this.bwdTripIdx;
+    const tripList = this.tripList;
+    const footpathsByStopIdx = this.footpathsByStopIdx;
 
-          const paths = this.footpaths.get(depStopId) || [];
-          for (const fp of paths) {
-            if (fp.from === fp.to) continue;
-            // Reverse direction: we are walking from fp.to to depStopId
-            // So departure from fp.to must be (c.departure_time - walkTime - penalty)
-            const walkDep = c.departure_time - fp.walkTime - TRANSFER_PENALTY;
-            const fpState = latestDeparture.get(fp.to)!;
-            if (walkDep > fpState.time || (walkDep === fpState.time && newTransfers + 1 < fpState.transfers)) {
-              latestDeparture.set(fp.to, { time: walkDep, transfers: newTransfers + 1 });
-              outConnection.set(fp.to, { type: 'footpath', from: fp.to, to: depStopId, walkTime: fp.walkTime, connectionTime: c.departure_time });
+    for (let i = startIdx; i < n; i++) {
+      const arrTime = bwdArrTime[i];
+      if (arrTime < bestTotalTime) {
+        break; // Early exit: sorted descending by arrival_time, no subsequent connection can depart after bestTotalTime
+      }
+
+      const tripIdx = bwdTripIdx[i];
+      if (activeService[tripList[tripIdx].serviceIdx] === 0) {
+        continue;
+      }
+
+      const arrStopIdx = bwdArrStop[i];
+      const arrLatestDep = latestDepartureTime[arrStopIdx];
+      const wasReached = tripAlightStop[tripIdx] !== -1;
+
+      if (arrLatestDep >= arrTime || wasReached) {
+        if (!wasReached) {
+          tripAlightStop[tripIdx] = arrStopIdx;
+        }
+        const depStopIdx = bwdDepStop[i];
+        // Only record reachable connections!
+        tripNextConnection.set(tripIdx * numStops + depStopIdx, i);
+
+        const depTime = bwdDepTime[i];
+        const newTransfers = wasReached ? latestDepartureTransfers[arrStopIdx] : latestDepartureTransfers[arrStopIdx] + 1;
+        const curDepTime = latestDepartureTime[depStopIdx];
+
+        if (depTime > curDepTime || (depTime === curDepTime && newTransfers < latestDepartureTransfers[depStopIdx])) {
+          latestDepartureTime[depStopIdx] = depTime;
+          latestDepartureTransfers[depStopIdx] = newTransfers;
+          outConnection.set(depStopIdx, i);
+
+          const sw = startStopWalk[depStopIdx];
+          if (sw !== -1 && depTime - sw > bestTotalTime) {
+            bestTotalTime = depTime - sw;
+            bestStartStopIdx = depStopIdx;
+            initialWalkTime = sw;
+          }
+
+          const paths = footpathsByStopIdx[depStopIdx];
+          for (let p = 0; p < paths.length; p++) {
+            const fp = paths[p];
+            const walkDep = depTime - fp.walkTime - TRANSFER_PENALTY;
+            const fpFrom = fp.toIdx; // symmetric footpaths
+            const fpCurDep = latestDepartureTime[fpFrom];
+            if (walkDep > fpCurDep || (walkDep === fpCurDep && newTransfers + 1 < latestDepartureTransfers[fpFrom])) {
+              latestDepartureTime[fpFrom] = walkDep;
+              latestDepartureTransfers[fpFrom] = newTransfers + 1;
+              outConnection.set(fpFrom, {
+                type: 'footpath',
+                fromIdx: fpFrom,
+                toIdx: depStopIdx,
+                walkTime: fp.walkTime,
+                connectionTime: depTime
+              });
+
+              const fpSw = startStopWalk[fpFrom];
+              if (fpSw !== -1 && walkDep - fpSw > bestTotalTime) {
+                bestTotalTime = walkDep - fpSw;
+                bestStartStopIdx = fpFrom;
+                initialWalkTime = fpSw;
+              }
             }
           }
         }
       }
     }
 
-    let bestTotalTime = -Infinity;
-    let bestStartStopId: string | null = null;
-    let initialWalkTime = 0;
-
-    for (const { stop, walkTime } of startStops) {
-      const dep = latestDeparture.get(stop.id)!.time;
-      if (dep !== -Infinity) {
-        const total = dep - walkTime;
-        if (total > bestTotalTime) {
-          bestTotalTime = total;
-          bestStartStopId = stop.id;
-          initialWalkTime = walkTime;
-        }
-      }
-    }
-    
-    // Check if any transit route was found BEFORE comparing with walking
-    if (bestTotalTime === -Infinity || !bestStartStopId) {
-      // No transit found — only offer walking if the distance is reasonable (< 3km)
+    if (bestTotalTime === NEG_INF || bestStartStopIdx === -1) {
       const MAX_WALK_ONLY_METERS = 3000;
       if (directWalkDist <= MAX_WALK_ONLY_METERS) {
         const directWalkDep = targetTime - directWalkTime;
@@ -586,7 +1389,6 @@ export class CSARouter {
       return [];
     }
 
-    // Transit route found — check if walking is genuinely faster (later departure = better)
     const directWalkDep = targetTime - directWalkTime;
     if (directWalkDep > bestTotalTime) {
       return [{
@@ -606,43 +1408,52 @@ export class CSARouter {
       }];
     }
 
-    const rawPath = [];
-    let currentStopId = bestStartStopId;
-    let currentItem = outConnection.get(currentStopId);
-    
-    while (currentItem) {
-      if (currentItem.type === 'footpath') {
+    const rawPath: Array<any> = [];
+    let currentStopIdx = bestStartStopIdx;
+    let currentItem = outConnection.get(currentStopIdx);
+
+    while (currentItem !== undefined) {
+      if (typeof currentItem === 'object' && currentItem.type === 'footpath') {
         rawPath.push(currentItem);
-        currentStopId = currentItem.to;
-        currentItem = outConnection.get(currentStopId);
+        currentStopIdx = currentItem.toIdx;
+        currentItem = outConnection.get(currentStopIdx);
       } else {
-        const tripId = currentItem.trip_id;
-        const alightStopId = tripAlightStop.get(tripId)!;
-        
-        let tempStop = currentStopId;
+        const connIdx = currentItem as number;
+        const tripIdx = bwdTripIdx[connIdx];
+        const alightStopIdx = tripAlightStop[tripIdx];
+
+        let tempStop = currentStopIdx;
         let count = 0;
-        while (tempStop !== alightStopId) {
-          const conn = tripNextConnection.get(tripId + '_' + tempStop);
-          if (!conn) break;
-          rawPath.push(conn);
-          tempStop = conn.arrival_stop;
+        while (tempStop !== alightStopIdx) {
+          const cIdx = tripNextConnection.get(tripIdx * numStops + tempStop);
+          if (cIdx === undefined) break;
+          rawPath.push({
+            type: 'conn',
+            depStopIdx: bwdDepStop[cIdx],
+            arrStopIdx: bwdArrStop[cIdx],
+            depTime: bwdDepTime[cIdx],
+            arrTime: bwdArrTime[cIdx],
+            tripIdx: bwdTripIdx[cIdx]
+          });
+          tempStop = bwdArrStop[cIdx];
           count++;
           if (count > 100) break;
         }
-        currentStopId = alightStopId;
-        currentItem = outConnection.get(currentStopId);
+        currentStopIdx = alightStopIdx;
+        currentItem = outConnection.get(currentStopIdx);
       }
       if (rawPath.length > 200) break;
     }
 
-    const groupedLegs = [];
-    
+    const groupedLegs: any[] = [];
+
     if (initialWalkTime > 0) {
+      const startStop = this.stopList[bestStartStopIdx];
       groupedLegs.push({
         board_stop_id: 'START',
         board_stop_name: 'Origin',
-        alight_stop_id: bestStartStopId,
-        alight_stop_name: this.stops.get(bestStartStopId)?.name || '',
+        alight_stop_id: startStop.id,
+        alight_stop_name: startStop.name,
         departure_time: this.secondsToTime(bestTotalTime),
         arrival_time: this.secondsToTime(bestTotalTime + initialWalkTime),
         route_short_name: 'Walk',
@@ -652,34 +1463,42 @@ export class CSARouter {
       });
     }
 
+    const pushTransitLeg = (startLeg: any, lastLeg: any, tripIdx: number) => {
+      const tripInfo = this.tripList[tripIdx];
+      const boardStop = this.stopList[startLeg.depStopIdx];
+      const alightStop = this.stopList[lastLeg.arrStopIdx];
+      groupedLegs.push({
+        board_stop_id: boardStop.id,
+        board_stop_name: boardStop.name,
+        alight_stop_id: alightStop.id,
+        alight_stop_name: alightStop.name,
+        departure_time: this.secondsToTime(startLeg.depTime),
+        arrival_time: this.secondsToTime(lastLeg.arrTime),
+        route_short_name: tripInfo.route_short_name,
+        route_long_name: tripInfo.route_long_name,
+        route_type: tripInfo.route_type
+      });
+    };
+
     if (rawPath.length > 0) {
-      let currentTrip = rawPath[0].trip_id;
+      let currentTrip: number | null = rawPath[0].type === 'conn' ? rawPath[0].tripIdx : null;
       let startLeg = rawPath[0];
       let lastLeg = rawPath[0];
 
       for (let i = 1; i < rawPath.length; i++) {
         const item = rawPath[i];
         if (item.type === 'footpath') {
-          if (currentTrip) {
-            const tripInfo = this.trips.get(currentTrip)!;
-            groupedLegs.push({
-              board_stop_id: startLeg.departure_stop,
-              board_stop_name: this.stops.get(startLeg.departure_stop)?.name || '',
-              alight_stop_id: lastLeg.arrival_stop,
-              alight_stop_name: this.stops.get(lastLeg.arrival_stop)?.name || '',
-              departure_time: this.secondsToTime(startLeg.departure_time),
-              arrival_time: this.secondsToTime(lastLeg.arrival_time),
-              route_short_name: tripInfo.route_short_name,
-              route_long_name: tripInfo.route_long_name,
-              route_type: tripInfo.route_type
-            });
+          if (currentTrip !== null) {
+            pushTransitLeg(startLeg, lastLeg, currentTrip);
             currentTrip = null;
           }
+          const fromStop = this.stopList[item.fromIdx];
+          const toStop = this.stopList[item.toIdx];
           groupedLegs.push({
-            board_stop_id: item.from,
-            board_stop_name: this.stops.get(item.from)?.name || '',
-            alight_stop_id: item.to,
-            alight_stop_name: this.stops.get(item.to)?.name || '',
+            board_stop_id: fromStop.id,
+            board_stop_name: fromStop.name,
+            alight_stop_id: toStop.id,
+            alight_stop_name: toStop.name,
             departure_time: this.secondsToTime(item.connectionTime - item.walkTime),
             arrival_time: this.secondsToTime(item.connectionTime),
             route_short_name: 'Walk',
@@ -688,52 +1507,35 @@ export class CSARouter {
             distance: Math.round(item.walkTime * 1.4)
           });
         } else {
-          if (item.trip_id === currentTrip) {
+          if (item.tripIdx === currentTrip) {
             lastLeg = item;
           } else {
-            if (currentTrip) {
-              const tripInfo = this.trips.get(currentTrip)!;
-              groupedLegs.push({
-                board_stop_id: startLeg.departure_stop,
-                board_stop_name: this.stops.get(startLeg.departure_stop)?.name || '',
-                alight_stop_id: lastLeg.arrival_stop,
-                alight_stop_name: this.stops.get(lastLeg.arrival_stop)?.name || '',
-                departure_time: this.secondsToTime(startLeg.departure_time),
-                arrival_time: this.secondsToTime(lastLeg.arrival_time),
-                route_short_name: tripInfo.route_short_name,
-                route_long_name: tripInfo.route_long_name,
-                route_type: tripInfo.route_type
-              });
+            if (currentTrip !== null) {
+              pushTransitLeg(startLeg, lastLeg, currentTrip);
             }
-            currentTrip = item.trip_id;
+            currentTrip = item.tripIdx;
             startLeg = item;
             lastLeg = item;
           }
         }
       }
-      if (currentTrip) {
-        const tripInfo = this.trips.get(currentTrip)!;
-        groupedLegs.push({
-          board_stop_id: startLeg.departure_stop,
-          board_stop_name: this.stops.get(startLeg.departure_stop)?.name || '',
-          alight_stop_id: lastLeg.arrival_stop,
-          alight_stop_name: this.stops.get(lastLeg.arrival_stop)?.name || '',
-          departure_time: this.secondsToTime(startLeg.departure_time),
-          arrival_time: this.secondsToTime(lastLeg.arrival_time),
-          route_short_name: tripInfo.route_short_name,
-          route_long_name: tripInfo.route_long_name,
-          route_type: tripInfo.route_type
-        });
+      if (currentTrip !== null) {
+        pushTransitLeg(startLeg, lastLeg, currentTrip);
       }
     }
 
-    const finalTransitStopId = rawPath.length > 0 ? (rawPath[rawPath.length - 1].type === 'footpath' ? rawPath[rawPath.length - 1].to : rawPath[rawPath.length - 1].arrival_stop) : bestStartStopId;
-    const finalWalk = walkToEnd.get(finalTransitStopId);
-    if (finalWalk && finalWalk > 0) {
-      const depTime = rawPath.length > 0 ? (rawPath[rawPath.length - 1].type === 'footpath' ? rawPath[rawPath.length - 1].connectionTime : rawPath[rawPath.length - 1].arrival_time) : (bestTotalTime + initialWalkTime);
+    const finalTransitStopIdx = rawPath.length > 0
+      ? (rawPath[rawPath.length - 1].type === 'footpath' ? rawPath[rawPath.length - 1].toIdx : rawPath[rawPath.length - 1].arrStopIdx)
+      : bestStartStopIdx;
+    const finalWalk = walkToEnd[finalTransitStopIdx];
+    if (finalWalk > 0) {
+      const depTime = rawPath.length > 0
+        ? (rawPath[rawPath.length - 1].type === 'footpath' ? rawPath[rawPath.length - 1].connectionTime : rawPath[rawPath.length - 1].arrTime)
+        : (bestTotalTime + initialWalkTime);
+      const finalStop = this.stopList[finalTransitStopIdx];
       groupedLegs.push({
-        board_stop_id: finalTransitStopId,
-        board_stop_name: this.stops.get(finalTransitStopId)?.name || '',
+        board_stop_id: finalStop.id,
+        board_stop_name: finalStop.name,
         alight_stop_id: 'END',
         alight_stop_name: 'Destination',
         departure_time: this.secondsToTime(depTime),

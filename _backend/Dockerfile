@@ -6,6 +6,7 @@ RUN apk add --no-cache --virtual .build-deps python3 make g++ \
   && apk del .build-deps
 
 FROM node:20-alpine AS dev
+RUN apk add --no-cache unzip
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY package*.json ./
@@ -15,6 +16,7 @@ EXPOSE 3000
 CMD ["npx", "tsx", "watch", "src/app.ts"]
 
 FROM node:20-alpine AS prod
+RUN apk add --no-cache unzip
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY package*.json ./

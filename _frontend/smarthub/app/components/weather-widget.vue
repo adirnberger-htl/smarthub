@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onUnmounted } from 'vue'
 import { useSmarthubApi } from '../composables/use-smarthub-api.js'
-import { useSettings } from '../composables/use-settings.js'
+import { useSettings, type RoutineCoords } from '../composables/use-settings.js'
 
 interface ForecastInterval {
   time: string
@@ -21,6 +21,7 @@ interface WeatherResponse {
 
 const props = defineProps<{
   activeDestination?: string
+  activeDestinationCoords?: RoutineCoords
 }>()
 
 const configuredWeather = ref<ForecastInterval | null>(null)
@@ -42,7 +43,17 @@ const { getGlobalSettings, state } = useSettings()
 
 const configuredLocation = computed(() => getGlobalSettings().weatherLocation || 'Linz, Austria')
 
-async function fetchWeatherForLocation(locationName: string) {
+async function fetchWeatherForLocation(locationName: string, coords?: RoutineCoords) {
+  if (coords && coords.address === locationName) {
+    const response = await get<WeatherResponse>('/api/weather/forecast', {
+      lat: coords.lat,
+      lon: coords.lon,
+    })
+    return {
+      forecast: response.forecasts[0] ?? null,
+      formattedAddress: coords.formattedAddress || response.formattedAddress || locationName
+    }
+  }
   const response = await get<WeatherResponse>('/api/weather/forecast', {
     place: locationName,
   })
@@ -80,7 +91,7 @@ watch(() => props.activeDestination, async (newVal) => {
   destinationLoading.value = true
   destinationError.value = ''
   try {
-    const res = await fetchWeatherForLocation(newVal)
+    const res = await fetchWeatherForLocation(newVal, props.activeDestinationCoords)
     destinationWeather.value = res.forecast
     destinationAddress.value = res.formattedAddress
   } catch (e) {
