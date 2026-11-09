@@ -15,7 +15,6 @@ It helps you get ready in the morning by showing you exactly what you need befor
   <img src="https://img.shields.io/badge/Express.js-000000?style=flat-square&logo=express&logoColor=white" alt="Express" />
   <img src="https://img.shields.io/badge/SQLite-003B57?style=flat-square&logo=sqlite&logoColor=white" alt="SQLite" />
   <img src="https://img.shields.io/badge/KNX-00953B?style=flat-square" alt="KNXnet/IP" />
-  <img src="https://img.shields.io/badge/Neo4j-5.x-008CC1?style=flat-square&logo=neo4j&logoColor=white" alt="Neo4j" />
   <img src="https://img.shields.io/badge/Docker-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker" />
 </p>
 
@@ -26,7 +25,7 @@ It helps you get ready in the morning by showing you exactly what you need befor
 When you wake up, you don't want to open five different apps to check the weather, alarms, transit connections, and room controls. SmartHub puts everything onto a single dedicated screen that adapts automatically to your schedule.
 
 - **Automatic widget switching**: On weekday mornings, it displays your bus route or car travel time to work or school based on your active routine. Outside of commute windows, it shows a clock, weather, upcoming calendar appointments, and daily motivation.
-- **In-memory public transit routing (CSA)**: Computes multi-stop transit routes across official Austrian public transport schedules (Linz AG & OÖVV GTFS datasets) in milliseconds using the Connection Scan Algorithm (`csa-router.ts`), backed by a fast binary graph cache (`csa-graph-cache.bin`) and optional Neo4j fallback.
+- **In-memory public transit routing (CSA)**: Computes multi-stop transit routes across official Austrian public transport schedules (Linz AG & OÖVV GTFS datasets) in milliseconds using the Connection Scan Algorithm (`csa-router.ts`), backed by a fast binary graph cache (`csa-graph-cache.bin`).
 - **KNX smart room control & hardware OSD**: Connects to the local KNXnet/IP multicast bus (`224.0.23.12:3671`) to control ceiling lights, dimmable desk lights, RGB LED strips, power outlets, and window blinds/slats via a unified hardware-style On-Screen Display (`device-osd-overlay.vue`) with real-time Server-Sent Events (SSE) state synchronization.
 - **Live weather & destination forecast**: Fetches 2-hour interval forecasts via Open-Meteo for both your home and routine destination so you know whether you need an umbrella.
 - **Google Calendar integration**: OAuth2 integration showing your upcoming daily appointments directly on the dashboard.
@@ -44,7 +43,6 @@ flowchart TD
     subgraph Data & Routing
         CSA["In-Memory CSA Router\nGTFS binary graph cache (Linz AG & OÖVV)"]
         SQLite["SQLite Database\nUsers, routines, alarms, settings & geocode cache"]
-        Neo4j["Neo4j Graph Database (Optional)\nFallback transit graph"]
     end
 
     subgraph Smart Home & External APIs
@@ -56,7 +54,6 @@ flowchart TD
     Browser <-->|REST API / Cookies / SSE| Backend
     Backend <-->|Fast Route Scan| CSA
     Backend <-->|User Data & Cache| SQLite
-    Backend -.->|Fallback Queries| Neo4j
     Backend <-->|UDP Multicast Telegrams| KNX
     Backend -->|Forecasts| OpenMeteo
     Backend -->|Geocode / Directions / Events| Geocoding
@@ -78,9 +75,8 @@ flowchart TD
 - **Smart Home Integration (KNX)**:
   - Located in `_backend/src/services/knx-service.ts`, `_backend/src/services/device-service.ts`, and `_backend/src/repo/knx-repo.ts`.
   - Communicates via `knxultimate` over UDP multicast and streams live group-address state updates to connected clients via `/api/devices/events`.
-- **Databases**:
+- **Database**:
   - **SQLite (`better-sqlite3`)**: Stores user accounts, preferences, routines, alarms, OAuth tokens, and cached geocoding lookups.
-  - **Neo4j 5 (Optional `--profile neo4j`)**: Graph database for GTFS exploration and fallback routing.
 
 ---
 
@@ -90,7 +86,7 @@ flowchart TD
 
 1. Clone the repository and enter the directory:
    ```bash
-   git clone https://github.com/2526-wmc-3bhif-classroom-org/sommerprojekt-wmc-hungry-team.git
+   git clone <repository-url>
    cd smarthub
    ```
 
@@ -103,7 +99,6 @@ flowchart TD
    ```bash
    docker compose up -d
    ```
-   *(Optional: To also start Neo4j and the GTFS graph loader, run `docker compose --profile neo4j up -d`.)*
 
 4. Open the apps in your browser:
    - **Frontend Dashboard**: [http://localhost:3001](http://localhost:3001)
@@ -154,8 +149,6 @@ Dashboard runs on `http://localhost:3000` (or `3001` via Docker).
 | `KNX_PORT` | KNX UDP port (default: `3671`) |
 | `KNX_PHYS_ADDR` | Physical KNX address assigned to SmartHub (default: `1.2.6`) |
 | `KNX_INTERFACE` | Optional local network interface IP/name for KNX multicast |
-| `NEO4J_USER` / `NEO4J_PASSWORD` | Credentials for optional Neo4j container |
-| `NEO4J_HOST` / `NEO4J_BOLT_PORT` | Neo4j host and Bolt port (default: `7687`) |
 
 ---
 
@@ -167,7 +160,7 @@ smarthub/
 │   ├── src/
 │   │   ├── db/                # SQLite connection & schema migrations
 │   │   ├── middleware/        # Authentication & session checks
-│   │   ├── repo/              # CSA transit router, KNX registry, SQLite & Neo4j repos
+│   │   ├── repo/              # CSA transit router, KNX registry & SQLite repos
 │   │   ├── routers/           # Bus, weather, places, routines, auth, settings & devices routes
 │   │   ├── services/          # KNX multicast client & unified smart device service
 │   │   ├── utils/             # Request validation & HTTP helpers
@@ -187,20 +180,9 @@ smarthub/
 ├── data/                      # GTFS schedule archives (Linz AG & OÖVV) & binary CSA cache
 ├── docs/                      # Architecture diagrams, KNX ETS export (.esf), and mockups
 ├── openspec/                  # OpenSpec feature specifications and change archive
-├── scripts/                   # Optional Neo4j GTFS import script
 ├── docker-compose.yaml        # Production/standard multi-container Docker setup
 ├── docker-compose.dev.yaml    # Development Docker override with live reload
 ├── showcase.gif               # Animated preview of the dashboard
 └── README.md
 ```
 
----
-
-## Team
-
-- **Arthur Dirnberger**
-- **Matthias Darabosch**
-- **Benjamin Stoica**
-- **Almir Hadzic**
-
-School project built at **HTL Leonding**.

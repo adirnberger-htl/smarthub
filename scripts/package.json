@@ -1,6 +1,0 @@
-{
-  "dependencies": {
-    "dotenv": "^17.4.2",
-    "neo4j-driver": "^6.3.0"
-  }
-}

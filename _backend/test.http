@@ -2,7 +2,7 @@
 ### BUS ROUTING API TESTS
 ### ============================================
 
-### Health Check - Neo4j Connection
+### Health Check - CSA Transit Router Status
 GET http://localhost:3000/api/bus/test
 Accept: application/json
 

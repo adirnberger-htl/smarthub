@@ -1,5 +1,4 @@
 import {Router, Request, Response} from 'express';
-import {findRoutes, testNeo4jConnection} from '../repo/bus-repo-neo4j.js';
 import {parseCoordinatePair, validateTimeFormat, validateMaxTransfers} from '../utils/validation.js';
 import { globalCSARouter } from '../repo/csa-router.js';
 
@@ -10,26 +9,9 @@ console.log('bus router loaded');
 // Test endpoint for routing backend
 router.get('/api/bus/test', async (req: Request, res: Response) => {
     try {
-        if (globalCSARouter.ready) {
-            return res.json({
-                status: 'ok',
-                backend: 'csa-in-memory',
-                neo4j: 'up',
-                timestamp: new Date().toISOString()
-            });
-        }
-        let neo4jStatus = 'down';
-        try {
-            await testNeo4jConnection();
-            neo4jStatus = 'up';
-        } catch (e: any) {
-            console.warn('Neo4j connection failed:', e.message);
-        }
-
-        res.json({
-            status: neo4jStatus === 'up' ? 'ok' : 'error',
-            backend: 'neo4j',
-            neo4j: neo4jStatus,
+        return res.json({
+            status: globalCSARouter.ready ? 'ok' : 'loading',
+            backend: 'csa-in-memory',
             timestamp: new Date().toISOString()
         });
     } catch (e) {
@@ -79,38 +61,32 @@ router.get('/api/bus/route', async (req: Request, res: Response) => {
             return res.status(400).json({ error: transfersResult.error });
         }
 
+        if (!globalCSARouter.ready) {
+            return res.status(503).json({ error: 'Transit routing graph not ready' });
+        }
+
         let routes = [];
-        if (globalCSARouter.ready) {
-            if (isArrival) {
-                routes = globalCSARouter.findReverseRoute(
-                    coords.latA, coords.lonA,
-                    coords.latB, coords.lonB,
-                    timeResult.time
-                );
-                if (minDepTime && (!routes || routes.length === 0 || routes[0].departure_time < minDepTime)) {
-                    routes = globalCSARouter.findRoute(
-                        coords.latA, coords.lonA,
-                        coords.latB, coords.lonB,
-                        minDepTime
-                    );
-                }
-            } else {
+        if (isArrival) {
+            routes = globalCSARouter.findReverseRoute(
+                coords.latA, coords.lonA,
+                coords.latB, coords.lonB,
+                timeResult.time
+            );
+            if (minDepTime && (!routes || routes.length === 0 || routes[0].departure_time < minDepTime)) {
                 routes = globalCSARouter.findRoute(
                     coords.latA, coords.lonA,
                     coords.latB, coords.lonB,
-                    timeResult.time
+                    minDepTime
                 );
             }
-            res.set('X-Route-Backend', 'csa-in-memory');
         } else {
-            routes = await findRoutes(
+            routes = globalCSARouter.findRoute(
                 coords.latA, coords.lonA,
                 coords.latB, coords.lonB,
-                minDepTime ?? timeResult.time,
-                transfersResult.maxTransfers
+                timeResult.time
             );
-            res.set('X-Route-Backend', 'neo4j');
         }
+        res.set('X-Route-Backend', 'csa-in-memory');
         
         res.json(routes);
     } catch (e) {
