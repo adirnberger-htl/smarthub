@@ -43,6 +43,54 @@ export interface DeviceCommandDTO {
   slatAngle?: number
 }
 
+export interface KnxConnectionStatusDTO {
+  enabled: boolean
+  connected: boolean
+  protocol: string
+  multicastIp: string
+  port: number
+  physAddr: string
+  lastTelegram: string | null
+  updatedAt: string
+}
+
+export interface DevStatusResponse {
+  timestamp: string
+  knx: KnxConnectionStatusDTO
+  apis: {
+    backend: {
+      status: 'ok' | 'error'
+      uptimeSeconds: number
+      timestamp: string
+      latencyMs?: number
+    }
+    csaTransit: {
+      status: 'ok' | 'loading' | 'error'
+      ready: boolean
+      backend: string
+    }
+    weather: {
+      provider: string
+      cachedEntries: number
+      lastSuccess: string | null
+      lastError: string | null
+      status: 'ok' | 'error'
+    }
+    googlePlaces: {
+      provider: string
+      keyConfigured: boolean
+      cachedEntries: number
+      lastError: string | null
+      status: 'ok' | 'missing_key' | 'error'
+    }
+    googleAuth: {
+      status: 'ok' | 'not_connected'
+      connected: boolean
+      email: string | null
+    }
+  }
+}
+
 export interface KnxEnvironmentDTO {
   sunElevation: number
   sunAzimuth: number
@@ -202,6 +250,10 @@ export function useSmarthubApi() {
     return buildUrl('/api/devices/events')
   }
 
+  const fetchDevStatus = async (): Promise<DevStatusResponse> => {
+    return request<DevStatusResponse>('GET', '/api/dev/status', {})
+  }
+
   return {
     get,
     post,
@@ -224,5 +276,6 @@ export function useSmarthubApi() {
     fetchDevices,
     sendDeviceCommand,
     getDevicesEventsUrl,
+    fetchDevStatus,
   }
 }

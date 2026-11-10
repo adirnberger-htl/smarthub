@@ -218,6 +218,13 @@ async function autoConfigure(item: any) {
   }
 }
 
+function toggleDevOverlay(e: Event) {
+  const target = e.target as HTMLInputElement
+  globalSettings.value.devOverlayEnabled = target.checked
+  saveGlobalSettings()
+  showToast(target.checked ? 'Dev status overlay enabled' : 'Dev status overlay disabled')
+}
+
 onMounted(async () => {
   await refreshGoogleStatus()
   if (route.query.google === 'connected') {
@@ -685,6 +692,33 @@ onMounted(async () => {
               <button class="delete-routine-btn" @click="handleLogout">
                 Logout
               </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="routines-section">
+        <div class="routines-section-header">
+          <h3><i class="fa-solid fa-code" style="color: var(--color-primary); margin-right: 8px;"></i>Developer &amp; Diagnostics</h3>
+        </div>
+        
+        <div class="routine-card">
+          <div class="routine-card__body">
+            <div class="routine-card__row" style="align-items: center; justify-content: space-between;">
+              <div class="routine-card__field">
+                <label class="field-label">Status HUD Overlay</label>
+                <div style="font-size: 0.9rem; color: var(--text-secondary);">
+                  Display high-contrast KNX router &amp; API health diagnostics in top screen corners
+                </div>
+              </div>
+              <label class="alarm-toggle">
+                <input 
+                  type="checkbox" 
+                  :checked="globalSettings.devOverlayEnabled"
+                  @change="toggleDevOverlay"
+                />
+                <span class="slider"></span>
+              </label>
             </div>
           </div>
         </div>

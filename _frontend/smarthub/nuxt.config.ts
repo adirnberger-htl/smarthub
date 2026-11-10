@@ -26,6 +26,9 @@ export default defineNuxtConfig({
     },
   },
   vite: {
+    optimizeDeps: {
+      include: ['three'],
+    },
     server: {
       proxy: {
         '/api': {

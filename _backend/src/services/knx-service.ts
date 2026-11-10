@@ -30,6 +30,7 @@ export class KnxService extends EventEmitter {
   private processingQueue = false;
   private minCommandIntervalMs = 50;
   private startupReadTimer: NodeJS.Timeout | null = null;
+  private lastTelegramTimestamp: string | null = null;
 
   public start(): void {
     const envEnabled = (process.env.KNX_ENABLED ?? 'true').toLowerCase();
@@ -65,15 +66,18 @@ export class KnxService extends EventEmitter {
         this.connected = true;
         console.log(`[KNX] Connected via Multicast ${ipAddr}:${ipPort} (physAddr ${physAddr})`);
         this.scheduleStartupStatusReads();
+        this.emit('knx-status', this.getConnectionStatus());
       });
 
       this.client.on(KNXClientEvents.disconnected, (reason: string) => {
         this.connected = false;
         console.warn(`[KNX] Disconnected: ${reason}`);
+        this.emit('knx-status', this.getConnectionStatus());
       });
 
       this.client.on(KNXClientEvents.error, (err: Error) => {
         console.error('[KNX] Error:', err.message);
+        this.emit('knx-status', this.getConnectionStatus());
       });
 
       this.client.on(KNXClientEvents.indication, (packet, echoed) => {
@@ -86,6 +90,7 @@ export class KnxService extends EventEmitter {
       console.error('[KNX] Failed to initialize KNXClient, falling back to mock state:', err);
       this.client = null;
       this.connected = false;
+      this.emit('knx-status', this.getConnectionStatus());
     }
   }
 
@@ -102,7 +107,21 @@ export class KnxService extends EventEmitter {
       }
       this.client = null;
       this.connected = false;
+      this.emit('knx-status', this.getConnectionStatus());
     }
+  }
+
+  public getConnectionStatus() {
+    return {
+      enabled: this.enabled,
+      connected: this.connected,
+      protocol: 'Multicast',
+      multicastIp: process.env.KNX_MULTICAST_IP || '224.0.23.12',
+      port: Number(process.env.KNX_PORT || 3671),
+      physAddr: process.env.KNX_PHYS_ADDR || '1.2.6',
+      lastTelegram: this.lastTelegramTimestamp,
+      updatedAt: new Date().toISOString(),
+    };
   }
 
   public getStatus() {
@@ -113,6 +132,7 @@ export class KnxService extends EventEmitter {
       multicastIp: process.env.KNX_MULTICAST_IP || '224.0.23.12',
       port: Number(process.env.KNX_PORT || 3671),
       physAddr: process.env.KNX_PHYS_ADDR || '1.2.6',
+      lastTelegram: this.lastTelegramTimestamp,
       devices: listKnxDevices(),
       environment: getKnxEnvironmentState(),
     };
@@ -141,6 +161,9 @@ export class KnxService extends EventEmitter {
         if (payload.on !== undefined || clamped === 0 || clamped > 0) {
           await this.enqueueCommand(async () => {
             await this.client!.write(device.switchGA, shouldBeOn, '1.001');
+            if (device.altSwitchGA) {
+              await this.client!.write(device.altSwitchGA, shouldBeOn, '1.001');
+            }
           });
         }
       }
@@ -155,6 +178,9 @@ export class KnxService extends EventEmitter {
       if (this.enabled && this.client) {
         await this.enqueueCommand(async () => {
           await this.client!.write(device.switchGA, onVal, '1.001');
+          if (device.altSwitchGA) {
+            await this.client!.write(device.altSwitchGA, onVal, '1.001');
+          }
         });
       }
 
@@ -358,6 +384,7 @@ export class KnxService extends EventEmitter {
 
   private handleIndicationPacket(packet: any): void {
     try {
+      this.lastTelegramTimestamp = new Date().toISOString();
       const cemi = packet?.cEMIMessage;
       if (!cemi || !cemi.npdu || !cemi.dstAddress) return;
       if (!cemi.npdu.isGroupWrite && !cemi.npdu.isGroupResponse) return;

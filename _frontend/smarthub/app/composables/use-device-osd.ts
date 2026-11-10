@@ -277,12 +277,11 @@ let eventSource: EventSource | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 let listenerAttached = false
 
-const throttleState = new Map<
+const knobDebounceState = new Map<
   string,
   {
-    lastSent: number
     timer: ReturnType<typeof setTimeout> | null
-    pendingCmd: DeviceCommandDTO | null
+    pendingCmd: DeviceCommandDTO
   }
 >()
 
@@ -549,6 +548,7 @@ export function useDeviceOsd() {
       state.value.isCountingDown = true
       state.value.timerRevision += 1
       hideTimer = setTimeout(() => {
+        flushPendingKnobCommands()
         state.value.visible = false
         state.value.mode = 'IDLE'
         state.value.activeDeviceId = null
@@ -557,7 +557,20 @@ export function useDeviceOsd() {
     }, idleWaitMs)
   }
 
+  function flushPendingKnobCommands() {
+    if (knobDebounceState.size === 0) return
+    const entries = Array.from(knobDebounceState.entries())
+    knobDebounceState.clear()
+    for (const [id, entry] of entries) {
+      if (entry.timer) {
+        clearTimeout(entry.timer)
+      }
+      api.sendDeviceCommand(id, entry.pendingCmd).then(applySingleDeviceState).catch(() => {})
+    }
+  }
+
   function hideOsdImmediately() {
+    flushPendingKnobCommands()
     if (hideTimer) {
       clearTimeout(hideTimer)
       hideTimer = null
@@ -572,41 +585,32 @@ export function useDeviceOsd() {
     state.value.isCountingDown = false
   }
 
-  function dispatchCommandThrottled(id: string, cmd: DeviceCommandDTO, throttleMs = 150) {
-    const now = Date.now()
-    const entry = throttleState.get(id) ?? {
-      lastSent: 0,
-      timer: null,
-      pendingCmd: null,
+  function dispatchKnobCommandDebounced(id: string, cmd: DeviceCommandDTO, debounceMs = 700) {
+    const existing = knobDebounceState.get(id)
+    if (existing?.timer) {
+      clearTimeout(existing.timer)
     }
 
-    const elapsed = now - entry.lastSent
-    if (elapsed >= throttleMs && !entry.timer) {
-      entry.lastSent = now
-      throttleState.set(id, entry)
-      api.sendDeviceCommand(id, cmd).then(applySingleDeviceState).catch(() => {})
-      return
+    const mergedCmd: DeviceCommandDTO = {
+      ...(existing?.pendingCmd ?? {}),
+      ...cmd,
     }
 
-    entry.pendingCmd = { ...(entry.pendingCmd ?? {}), ...cmd }
-    if (!entry.timer) {
-      const wait = Math.max(10, throttleMs - elapsed)
-      entry.timer = setTimeout(() => {
-        const latest = throttleState.get(id)
-        if (!latest) return
-        const payload = latest.pendingCmd
-        latest.timer = null
-        latest.pendingCmd = null
-        latest.lastSent = Date.now()
-        if (payload) {
-          api.sendDeviceCommand(id, payload).then(applySingleDeviceState).catch(() => {})
-        }
-      }, wait)
-    }
-    throttleState.set(id, entry)
+    const timer = setTimeout(() => {
+      const current = knobDebounceState.get(id)
+      if (!current) return
+      knobDebounceState.delete(id)
+      api.sendDeviceCommand(id, current.pendingCmd).then(applySingleDeviceState).catch(() => {})
+    }, debounceMs)
+
+    knobDebounceState.set(id, {
+      timer,
+      pendingCmd: mergedCmd,
+    })
   }
 
   function enterSlotByIndex(slotIdx: number) {
+    flushPendingKnobCommands()
     if (slotIdx < 0 || slotIdx >= state.value.slotOrder.length) {
       hideOsdImmediately()
       return
@@ -823,7 +827,7 @@ export function useDeviceOsd() {
         dev.state.lastAction = dir > 0 ? 'stepDown' : 'stepUp'
       }
       resetAutoHideTimer()
-      dispatchCommandThrottled('blinds-all', { slatAngle: nextAngle })
+      dispatchKnobCommandDebounced('blinds-all', { slatAngle: nextAngle })
       return
     }
 
@@ -836,7 +840,7 @@ export function useDeviceOsd() {
         dev.state.on = nextBrightness > 0
       }
       resetAutoHideTimer()
-      dispatchCommandThrottled('desk-light', { brightness: nextBrightness })
+      dispatchKnobCommandDebounced('desk-light', { brightness: nextBrightness })
       return
     }
 
@@ -851,7 +855,7 @@ export function useDeviceOsd() {
         dev.state.rgb = nextHex
       }
       resetAutoHideTimer()
-      dispatchCommandThrottled('room-leds', { rgb: nextHex })
+      dispatchKnobCommandDebounced('room-leds', { rgb: nextHex })
       return
     }
 
@@ -864,11 +868,15 @@ export function useDeviceOsd() {
         dev.state.on = nextBrightness > 0
       }
       resetAutoHideTimer()
-      dispatchCommandThrottled('room-leds', { brightness: nextBrightness })
+      dispatchKnobCommandDebounced('room-leds', { brightness: nextBrightness })
     }
   }
 
   function triggerAction(action: OsdHardwareAction) {
+    if (action !== 'knob_cw' && action !== 'knob_ccw') {
+      flushPendingKnobCommands()
+    }
+
     if (action === 'btn1_main_light') {
       executeLightToggle('ceiling-light', 'Deckenlicht KZ West', 'fa-solid fa-lightbulb')
       return
@@ -1031,6 +1039,17 @@ export function useDeviceOsd() {
         }
       })
 
+      eventSource.addEventListener('knx-status', (evt: MessageEvent) => {
+        try {
+          const status = JSON.parse(evt.data)
+          if (status && typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('smarthub-knx-status', { detail: status }))
+          }
+        } catch {
+          // Ignore malformed JSON
+        }
+      })
+
       eventSource.onerror = () => {
         state.value.sseConnected = false
         if (eventSource) {
@@ -1074,6 +1093,7 @@ export function useDeviceOsd() {
   }
 
   function destroyDeviceOsd() {
+    flushPendingKnobCommands()
     if (!import.meta.client) return
     if (listenerAttached) {
       window.removeEventListener('keydown', handleKeyDown)
@@ -1115,5 +1135,6 @@ export function useDeviceOsd() {
     startLearningKey,
     cancelLearningKey,
     hideOsdImmediately,
+    flushPendingKnobCommands,
   }
 }

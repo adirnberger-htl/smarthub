@@ -12,6 +12,7 @@ import authRouter from './routers/auth.js';
 import routinesRouter from './routers/routines.js';
 import settingsRouter from './routers/settings.js';
 import devicesRouter from './routers/devices.js';
+import devRouter from './routers/dev.js';
 import { globalCSARouter } from './repo/csa-router.js';
 import { globalKnxService } from './services/knx-service.js';
 
@@ -64,6 +65,7 @@ app.use(authRouter);
 app.use(routinesRouter);
 app.use(settingsRouter);
 app.use(devicesRouter);
+app.use(devRouter);
 
 process.on('SIGINT', async () => {
     console.log('Shutting down...');
