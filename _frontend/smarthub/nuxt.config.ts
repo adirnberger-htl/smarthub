@@ -27,7 +27,7 @@ export default defineNuxtConfig({
   },
   vite: {
     optimizeDeps: {
-      include: ['three'],
+      include: ['three', 'leaflet'],
     },
     server: {
       proxy: {
