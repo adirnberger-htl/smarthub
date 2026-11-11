@@ -50,4 +50,6 @@ test('carRouter handles route computation via Express request/response simulatio
   assert.equal(jsonResponse.arrivalTime, '08:30:00');
   assert.ok(jsonResponse.durationSeconds > 0);
   assert.ok(jsonResponse.steps.length > 0);
+  assert.ok(Array.isArray(jsonResponse.geometry), 'Endpoint should return geometry array');
+  assert.ok(jsonResponse.geometry.length >= 2, 'Endpoint should return at least 2 geometry points');
 });

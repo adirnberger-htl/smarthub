@@ -27,6 +27,9 @@ test('calculateCarRoute computes driving route between Linz Hbf and JKU Linz', a
   assert.ok(result.departureTime < result.arrivalTime, 'Departure time should be earlier than arrival time');
   assert.ok(['normal', 'moderate', 'heavy'].includes(result.trafficCondition));
   assert.ok(result.steps.length > 0, 'Should return route steps');
+  assert.ok(Array.isArray(result.geometry), 'Should return geometry array');
+  assert.ok(result.geometry.length >= 2, 'Geometry should contain at least 2 coordinate points');
+  assert.equal(result.geometry[0].length, 2, 'Coordinate should be [lat, lon]');
   assert.ok(['google', 'osrm'].includes(result.provider));
 
   // Verify caching: second call returns same result

@@ -28,6 +28,7 @@ export interface CarRouteResponse {
   trafficDelayMinutes: number
   summary: string
   steps: CarRouteStep[]
+  geometry?: [number, number][]
   provider: 'google' | 'osrm'
   timestamp: string
 }

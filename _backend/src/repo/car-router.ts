@@ -16,6 +16,7 @@ export interface CarRouteResult {
   trafficDelayMinutes: number;
   summary: string;
   steps: CarRouteStep[];
+  geometry: [number, number][];
   provider: 'google' | 'osrm';
   timestamp: string;
 }
@@ -65,6 +66,41 @@ function classifyTraffic(baseDurationSec: number, trafficDurationSec: number): {
     return { condition: 'moderate', delayMinutes };
   }
   return { condition: 'normal', delayMinutes };
+}
+
+export function decodePolyline(encoded: string): [number, number][] {
+  const points: [number, number][] = [];
+  let index = 0;
+  const len = encoded.length;
+  let lat = 0;
+  let lng = 0;
+
+  while (index < len) {
+    let b: number;
+    let shift = 0;
+    let result = 0;
+    do {
+      b = encoded.charCodeAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    const dlat = (result & 1) !== 0 ? ~(result >> 1) : result >> 1;
+    lat += dlat;
+
+    shift = 0;
+    result = 0;
+    do {
+      b = encoded.charCodeAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    const dlng = (result & 1) !== 0 ? ~(result >> 1) : result >> 1;
+    lng += dlng;
+
+    points.push([Number((lat / 1e5).toFixed(6)), Number((lng / 1e5).toFixed(6))]);
+  }
+
+  return points;
 }
 
 export function getCarRoutingStatus() {
@@ -212,6 +248,15 @@ async function fetchGoogleDirections(opts: {
     durationSeconds: s.duration?.value || 0,
   }));
 
+  const rawPolyline = route.overview_polyline?.points;
+  let geometry: [number, number][] = [];
+  if (rawPolyline && typeof rawPolyline === 'string') {
+    geometry = decodePolyline(rawPolyline);
+  }
+  if (geometry.length === 0) {
+    geometry = [[latA, lonA], [latB, lonB]];
+  }
+
   return {
     departureTime: depTime,
     arrivalTime: arrTime,
@@ -222,6 +267,7 @@ async function fetchGoogleDirections(opts: {
     trafficDelayMinutes: delayMinutes,
     summary: route.summary || (steps[0]?.instruction ? steps[0].instruction.slice(0, 40) : 'Standard Route'),
     steps,
+    geometry,
     provider: 'google',
     timestamp: new Date().toISOString()
   };
@@ -238,7 +284,7 @@ async function fetchOsrmRoute(opts: {
   const { latA, lonA, latB, lonB, isArrival, targetTimeSec } = opts;
 
   // OSRM coordinates: {lon},{lat};{lon},{lat}
-  const url = `https://router.project-osrm.org/route/v1/driving/${lonA},${latA};${lonB},${latB}?overview=false&steps=true`;
+  const url = `https://router.project-osrm.org/route/v1/driving/${lonA},${latA};${lonB},${latB}?overview=full&geometries=geojson&steps=true`;
   const data = await fetchJson(url, 15000);
 
   if (data.code !== 'Ok' || !data.routes || data.routes.length === 0) {
@@ -275,6 +321,17 @@ async function fetchOsrmRoute(opts: {
 
   const summary = (route.legs?.[0]?.summary || steps.find(s => s.instruction.includes('onto'))?.instruction || 'Car Route').replace(/^turn (onto )?/i, '');
 
+  let geometry: [number, number][] = [];
+  if (route.geometry?.coordinates && Array.isArray(route.geometry.coordinates)) {
+    geometry = route.geometry.coordinates.map((c: any) => [
+      Number(c[1].toFixed(6)),
+      Number(c[0].toFixed(6))
+    ]);
+  }
+  if (geometry.length === 0) {
+    geometry = [[latA, lonA], [latB, lonB]];
+  }
+
   return {
     departureTime: depTime,
     arrivalTime: arrTime,
@@ -285,6 +342,7 @@ async function fetchOsrmRoute(opts: {
     trafficDelayMinutes: 0,
     summary,
     steps,
+    geometry,
     provider: 'osrm',
     timestamp: new Date().toISOString()
   };

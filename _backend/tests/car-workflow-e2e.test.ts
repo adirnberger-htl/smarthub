@@ -19,6 +19,7 @@ test('End-to-End Car Commute Routing Workflow', async () => {
   assert.ok(route.durationSeconds > 0, 'Duration must be positive');
   assert.ok(route.distanceMeters > 5000, 'Distance must exceed 5km');
   assert.ok(route.steps.length > 0, 'Must contain route maneuver steps');
+  assert.ok(Array.isArray(route.geometry) && route.geometry.length >= 2, 'Must contain route geometry coordinates');
   assert.ok(['normal', 'moderate', 'heavy'].includes(route.trafficCondition));
   assert.ok(['google', 'osrm'].includes(route.provider));
 

@@ -1,14 +1,15 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import type { RoutineItem } from '../composables/use-settings'
 import { useSettings } from '../composables/use-settings'
 import { useSmarthubApi, type CarRouteResponse } from '../composables/use-smarthub-api'
+import 'leaflet/dist/leaflet.css'
 
 const props = defineProps<{
   routine?: RoutineItem | null
 }>()
 
-const { updateRoutineItem } = useSettings()
+const { updateRoutineItem, resolvedTheme } = useSettings()
 const { geocodePlace, get } = useSmarthubApi()
 
 const carRoutine = computed(() => props.routine)
@@ -177,6 +178,142 @@ watch(
 
 let refreshTimer: ReturnType<typeof setInterval> | null = null
 
+const mapContainerRef = ref<HTMLElement | null>(null)
+let L: typeof import('leaflet') | null = null
+let mapInstance: any = null
+let tileLayerInstance: any = null
+let polylineLayer: any = null
+let markerLayerGroup: any = null
+
+const CARTO_DARK_URL = 'https://{s}.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}{r}.png'
+const CARTO_LIGHT_URL = 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png'
+
+function getThemeTileUrl(theme: string): string {
+  return theme === 'dark' ? CARTO_DARK_URL : CARTO_LIGHT_URL
+}
+
+function getPrimaryColor(): string {
+  if (typeof window !== 'undefined') {
+    const computed = getComputedStyle(document.documentElement).getPropertyValue('--color-primary').trim()
+    if (computed) return computed
+  }
+  return '#6366f1'
+}
+
+async function ensureLeaflet(): Promise<typeof import('leaflet') | null> {
+  if (L) return L
+  if (typeof window === 'undefined') return null
+  try {
+    L = await import('leaflet')
+    return L
+  } catch (err) {
+    console.error('Failed to load Leaflet:', err)
+    return null
+  }
+}
+
+async function renderRouteMap() {
+  if (typeof window === 'undefined') return
+  await nextTick()
+
+  if (!mapContainerRef.value) return
+
+  const leaflet = await ensureLeaflet()
+  if (!leaflet) return
+
+  if (!mapInstance) {
+    mapInstance = leaflet.map(mapContainerRef.value, {
+      dragging: false,
+      touchZoom: false,
+      scrollWheelZoom: false,
+      doubleClickZoom: false,
+      boxZoom: false,
+      keyboard: false,
+      zoomControl: false,
+      attributionControl: false,
+    })
+
+    const initialTileUrl = getThemeTileUrl(resolvedTheme.value)
+    tileLayerInstance = leaflet.tileLayer(initialTileUrl, {
+      subdomains: 'abcd',
+      maxZoom: 19,
+    }).addTo(mapInstance)
+  }
+
+  // Update geometry if route exists
+  if (route.value?.geometry && route.value.geometry.length > 0) {
+    const coords = route.value.geometry
+
+    if (polylineLayer) {
+      mapInstance.removeLayer(polylineLayer)
+      polylineLayer = null
+    }
+    if (markerLayerGroup) {
+      mapInstance.removeLayer(markerLayerGroup)
+      markerLayerGroup = null
+    }
+
+    polylineLayer = leaflet.polyline(coords, {
+      color: getPrimaryColor(),
+      weight: 5,
+      opacity: 0.95,
+      lineJoin: 'round',
+    }).addTo(mapInstance)
+
+    const startCoord = coords[0]
+    const endCoord = coords[coords.length - 1]
+
+    const startIcon = leaflet.divIcon({
+      className: 'car-map-pin-container',
+      html: '<div class="car-map-pin car-map-pin--start">A</div>',
+      iconSize: [22, 22],
+      iconAnchor: [11, 11],
+    })
+
+    const endIcon = leaflet.divIcon({
+      className: 'car-map-pin-container',
+      html: '<div class="car-map-pin car-map-pin--end">B</div>',
+      iconSize: [22, 22],
+      iconAnchor: [11, 11],
+    })
+
+    const startMarker = leaflet.marker(startCoord, { icon: startIcon, interactive: false })
+    const endMarker = leaflet.marker(endCoord, { icon: endIcon, interactive: false })
+
+    markerLayerGroup = leaflet.layerGroup([startMarker, endMarker]).addTo(mapInstance)
+
+    mapInstance.invalidateSize()
+    const bounds = polylineLayer.getBounds()
+    if (bounds.isValid()) {
+      mapInstance.fitBounds(bounds, {
+        padding: [16, 16],
+        maxZoom: 16,
+      })
+    }
+  }
+}
+
+watch(
+  () => route.value,
+  () => {
+    if (route.value) {
+      renderRouteMap()
+    }
+  }
+)
+
+watch(mapContainerRef, (el) => {
+  if (el && route.value) {
+    renderRouteMap()
+  }
+})
+
+watch(resolvedTheme, (newTheme) => {
+  if (tileLayerInstance) {
+    tileLayerInstance.setUrl(getThemeTileUrl(newTheme))
+  }
+})
+
 onMounted(() => {
   // Refresh traffic conditions every 5 minutes while active
   refreshTimer = setInterval(() => {
@@ -188,6 +325,10 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (refreshTimer) clearInterval(refreshTimer)
+  if (mapInstance) {
+    mapInstance.remove()
+    mapInstance = null
+  }
 })
 </script>
 
@@ -232,11 +373,7 @@ onUnmounted(() => {
           <div class="car-skeleton__card"></div>
           <div class="car-skeleton__card"></div>
         </div>
-        <div class="car-skeleton__steps">
-          <div class="car-skeleton__line car-skeleton__line--step"></div>
-          <div class="car-skeleton__line car-skeleton__line--step"></div>
-          <div class="car-skeleton__line car-skeleton__line--step"></div>
-        </div>
+        <div class="car-skeleton__map"></div>
         <div class="car-skeleton__summary">
           <div class="car-skeleton__summary-item"></div>
           <div class="car-skeleton__summary-item"></div>
@@ -283,23 +420,22 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Route Path & Road Overview -->
-      <div class="car-widget__path-card">
-        <div class="car-widget__path-header">
-          <i class="fa-solid fa-signs-post" style="color: var(--color-primary); margin-right: 6px;"></i>
-          <span class="car-widget__path-summary">via {{ route.summary }}</span>
+      <!-- Route Map Overview -->
+      <div class="car-widget__map-card">
+        <div class="car-widget__map-header">
+          <i class="fa-solid fa-map-location-dot" style="color: var(--color-primary); margin-right: 6px;"></i>
+          <span class="car-widget__map-summary">via {{ route.summary }}</span>
         </div>
-        <div class="car-widget__steps-list" v-if="route.steps && route.steps.length > 0">
-          <div v-for="(step, idx) in route.steps.slice(0, 4)" :key="idx" class="car-widget__step-row">
-            <span class="car-widget__step-bullet">•</span>
-            <span class="car-widget__step-text">{{ step.instruction }}</span>
-            <span class="car-widget__step-dist">
-              {{ step.distanceMeters >= 1000 ? (step.distanceMeters / 1000).toFixed(1) + 'km' : step.distanceMeters + 'm' }}
-            </span>
-          </div>
-          <div v-if="route.steps.length > 4" class="car-widget__step-more">
-            + {{ route.steps.length - 4 }} more maneuvers to arrival
-          </div>
+        <div class="car-widget__map-wrapper">
+          <ClientOnly>
+            <div ref="mapContainerRef" class="car-widget__map-canvas"></div>
+            <template #fallback>
+              <div class="car-widget__map-fallback">
+                <i class="fa-solid fa-circle-notch fa-spin"></i>
+                <span>Loading route map...</span>
+              </div>
+            </template>
+          </ClientOnly>
         </div>
       </div>
 
@@ -504,20 +640,20 @@ onUnmounted(() => {
   width: fit-content;
 }
 
-/* Path overview & steps */
-.car-widget__path-card {
+/* Route Map Card */
+.car-widget__map-card {
   background: var(--bg-surface-hover);
   border-radius: 10px;
-  padding: 14px 16px;
+  padding: 12px 14px;
   display: flex;
   flex-direction: column;
   gap: 8px;
   flex: 1;
-  min-height: 0;
+  min-height: 200px;
   overflow: hidden;
 }
 
-.car-widget__path-header {
+.car-widget__map-header {
   font-size: 0.95rem;
   font-weight: 600;
   color: var(--text-primary);
@@ -525,51 +661,68 @@ onUnmounted(() => {
   align-items: center;
 }
 
-.car-widget__path-summary {
+.car-widget__map-summary {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.car-widget__steps-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  overflow-y: auto;
-  font-size: 0.85rem;
-  color: var(--text-muted);
-}
-
-.car-widget__step-row {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-
-.car-widget__step-bullet {
-  color: var(--color-primary);
-  font-size: 1rem;
-}
-
-.car-widget__step-text {
+.car-widget__map-wrapper {
   flex: 1;
-  white-space: nowrap;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 160px;
+  border-radius: 8px;
   overflow: hidden;
-  text-overflow: ellipsis;
+  pointer-events: none; /* Disables all mouse and touch interaction */
+  user-select: none;
 }
 
-.car-widget__step-dist {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--text-light);
-  white-space: nowrap;
+.car-widget__map-canvas {
+  width: 100%;
+  height: 100%;
+  min-height: 160px;
 }
 
-.car-widget__step-more {
-  font-size: 0.8rem;
-  color: var(--text-light);
-  font-style: italic;
-  padding-left: 12px;
+.car-widget__map-fallback {
+  width: 100%;
+  height: 100%;
+  min-height: 160px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+:deep(.car-map-pin-container) {
+  background: transparent;
+  border: none;
+}
+
+:deep(.car-map-pin) {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #ffffff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+}
+
+:deep(.car-map-pin--start) {
+  background: #10b981;
+  border: 2px solid #ffffff;
+}
+
+:deep(.car-map-pin--end) {
+  background: #ef4444;
+  border: 2px solid #ffffff;
 }
 
 /* Metric summary bar */
@@ -631,16 +784,12 @@ onUnmounted(() => {
   animation: car-pulse 1.5s infinite;
 }
 
-.car-skeleton__steps {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+.car-skeleton__map {
   flex: 1;
-}
-
-.car-skeleton__line--step {
-  width: 100%;
-  height: 24px;
+  min-height: 180px;
+  border-radius: 10px;
+  background: var(--bg-surface-hover);
+  animation: car-pulse 1.5s infinite;
 }
 
 .car-skeleton__summary {
