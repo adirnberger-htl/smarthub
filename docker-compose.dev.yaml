@@ -19,6 +19,7 @@ services:
     command: ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "3000"]
     environment:
       NODE_ENV: development
+      NUXT_PUBLIC_CARTO_KEY: ${CARTO_KEY:-}
 
 volumes:
   backend_node_modules:

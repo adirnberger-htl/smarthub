@@ -11,6 +11,7 @@ const props = defineProps<{
 
 const { updateRoutineItem, resolvedTheme } = useSettings()
 const { geocodePlace, get } = useSmarthubApi()
+const runtimeConfig = useRuntimeConfig()
 
 const carRoutine = computed(() => props.routine)
 const startPlace = computed(() => carRoutine.value?.startAddress ?? '')
@@ -188,8 +189,19 @@ let markerLayerGroup: any = null
 const CARTO_DARK_URL = 'https://{s}.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}{r}.png'
 const CARTO_LIGHT_URL = 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png'
 
+let warnedMissingCartoKey = false
+
 function getThemeTileUrl(theme: string): string {
-  return theme === 'dark' ? CARTO_DARK_URL : CARTO_LIGHT_URL
+  const baseUrl = theme === 'dark' ? CARTO_DARK_URL : CARTO_LIGHT_URL
+  const key = ((runtimeConfig.public.cartoKey as string) || '').trim()
+  if (key) {
+    return `${baseUrl}?key=${encodeURIComponent(key)}`
+  }
+  if (!warnedMissingCartoKey && typeof window !== 'undefined') {
+    console.warn('[CarWidget] CARTO_KEY is not configured. Map tiles will display an "API KEY REQUIRED" watermark. Configure CARTO_KEY in .env.')
+    warnedMissingCartoKey = true
+  }
+  return baseUrl
 }
 
 function getPrimaryColor(): string {
