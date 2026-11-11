@@ -139,7 +139,7 @@ function showToast(msg: string) {
 
 async function autoConfigure(item: any) {
   if (!item.destination) { alert('Please set a destination first.'); return; }
-  if (item.transportMode === 'bus' && !item.startAddress) { alert('Please set a start address first.'); return; }
+  if (!item.startAddress) { alert('Please set a start address first.'); return; }
 
   try {
     let destCoords = item.destCoords?.address === item.destination ? item.destCoords : undefined
@@ -155,7 +155,7 @@ async function autoConfigure(item: any) {
     }
 
     let startCoords = item.startCoords?.address === item.startAddress ? item.startCoords : undefined
-    if (item.transportMode === 'bus' && !startCoords) {
+    if (!startCoords) {
       const home = await geocodePlace(item.startAddress)
       startCoords = {
         address: item.startAddress,
@@ -187,8 +187,18 @@ async function autoConfigure(item: any) {
       } else {
         throw new Error('Could not parse departure time.')
       }
+    } else if (item.transportMode === 'car' && startCoords && destCoords) {
+      const carRoute = await get<any>('/api/car/route', {
+        lat_a: startCoords.lat,
+        lon_a: startCoords.lon,
+        lat_b: destCoords.lat,
+        lon_b: destCoords.lon,
+        arrival_time: arrival,
+      })
+      if (!carRoute || !carRoute.departureTime) throw new Error('Could not calculate driving route.')
+      departureTimeStr = carRoute.departureTime.slice(0, 5)
     } else {
-      throw new Error('Auto-configure is currently optimized for Public Transport.')
+      throw new Error('Could not resolve route coordinates.')
     }
 
     if (departureTimeStr) {
@@ -213,6 +223,66 @@ async function autoConfigure(item: any) {
       showToast(`To arrive at ${item.arrivalTime}, you depart at ${departureTimeStr}. Alarm set to ${alarmTime}.`)
     }
 
+  } catch (e) {
+    alert(e instanceof Error ? e.message : String(e))
+  }
+}
+
+async function previewRoute(item: any) {
+  if (!item.destination) { alert('Please set a destination first.'); return; }
+  if (!item.startAddress) { alert('Please set a start address first.'); return; }
+
+  try {
+    let destCoords = item.destCoords?.address === item.destination ? item.destCoords : undefined
+    if (!destCoords) {
+      const place = await geocodePlace(item.destination)
+      destCoords = {
+        address: item.destination,
+        lat: place.coordinates.lat,
+        lon: place.coordinates.lon,
+        formattedAddress: place.formattedAddress
+      }
+      item.destCoords = destCoords
+    }
+
+    let startCoords = item.startCoords?.address === item.startAddress ? item.startCoords : undefined
+    if (!startCoords) {
+      const home = await geocodePlace(item.startAddress)
+      startCoords = {
+        address: item.startAddress,
+        lat: home.coordinates.lat,
+        lon: home.coordinates.lon,
+        formattedAddress: home.formattedAddress
+      }
+      item.startCoords = startCoords
+    }
+
+    const arrival = item.arrivalTime.includes(':') && item.arrivalTime.split(':').length >= 2 ? (item.arrivalTime.length === 5 ? item.arrivalTime + ':00' : item.arrivalTime) : item.arrivalTime + ':00'
+
+    if (item.transportMode === 'bus') {
+      const routes = await get<any[]>('/api/bus/route', {
+        lat_a: startCoords.lat,
+        lon_a: startCoords.lon,
+        lat_b: destCoords.lat,
+        lon_b: destCoords.lon,
+        arrival_time: arrival,
+        max_transfers: 2,
+      })
+      if (!routes || routes.length === 0) throw new Error('No bus routes found for this arrival time.')
+      setPreview({ routes })
+      showToast('Bus route preview loaded. Check dashboard.')
+    } else {
+      const carRoute = await get<any>('/api/car/route', {
+        lat_a: startCoords.lat,
+        lon_a: startCoords.lon,
+        lat_b: destCoords.lat,
+        lon_b: destCoords.lon,
+        arrival_time: arrival,
+      })
+      if (!carRoute || !carRoute.departureTime) throw new Error('Could not calculate driving route.')
+      setPreview({ carRoute })
+      showToast('Car route preview loaded. Check dashboard.')
+    }
   } catch (e) {
     alert(e instanceof Error ? e.message : String(e))
   }
@@ -431,8 +501,11 @@ onMounted(async () => {
                     updateRoutineItem(item);
                   }"
                 />
-                <button class="auto-configure-btn" @click="autoConfigure(item)" :disabled="item.transportMode !== 'bus'">
+                <button class="auto-configure-btn" @click="autoConfigure(item)">
                   <i class="fa-solid fa-wand-magic-sparkles" style="margin-right: 6px;"></i>Auto-Configure
+                </button>
+                <button class="preview-route-btn" @click="previewRoute(item)">
+                  <i class="fa-solid fa-eye" style="margin-right: 6px;"></i>Preview
                 </button>
               </div>
             </div>
@@ -798,6 +871,27 @@ onMounted(async () => {
   color: var(--text-light);
   box-shadow: none;
   cursor: not-allowed;
+}
+
+.preview-route-btn {
+  background: var(--bg-surface-hover);
+  color: var(--text-primary);
+  border: 1px solid var(--border-base);
+  border-radius: 12px;
+  padding: 8px 14px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 6px var(--shadow-sm);
+  transition: transform 0.2s, background-color 0.2s;
+  white-space: nowrap;
+}
+.preview-route-btn:hover {
+  transform: translateY(-1px);
+  background: var(--bg-input);
+}
+.preview-route-btn:active {
+  transform: scale(0.95);
 }
 
 .settings-page {

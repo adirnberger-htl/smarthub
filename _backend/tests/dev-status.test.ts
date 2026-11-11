@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { globalKnxService } from '../src/services/knx-service.js';
 import { getWeatherStatus } from '../src/repo/weather-repo.js';
 import { getPlacesStatus } from '../src/repo/places-repo.js';
+import { getCarRoutingStatus } from '../src/repo/car-router.js';
 import devRouter from '../src/routers/dev.js';
 
 test('KnxService provides connection status and events', () => {
@@ -28,6 +29,14 @@ test('getPlacesStatus returns configuration and in-memory status', () => {
   assert.equal(typeof places.keyConfigured, 'boolean');
   assert.equal(typeof places.cachedEntries, 'number');
   assert.ok(['ok', 'missing_key', 'error'].includes(places.status));
+});
+
+test('getCarRoutingStatus returns provider and cache status', () => {
+  const car = getCarRoutingStatus();
+  assert.ok(car.provider === 'Google Directions' || car.provider === 'OSRM');
+  assert.equal(typeof car.keyConfigured, 'boolean');
+  assert.equal(typeof car.cachedEntries, 'number');
+  assert.ok(['ok', 'degraded', 'error'].includes(car.status));
 });
 
 test('devRouter endpoint is defined', () => {

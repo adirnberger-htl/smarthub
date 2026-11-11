@@ -5,6 +5,7 @@ import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import busRouter from './routers/bus-route.js';
+import carRouter from './routers/car-route.js';
 import weatherRouter from './routers/weather.js';
 import placesRouter from './routers/places.js';
 import { closeDb, getDb } from './db/sqlite.js';
@@ -59,6 +60,7 @@ globalCSARouter.loadGraph().catch(console.error);
 globalKnxService.start();
 
 app.use(busRouter);
+app.use(carRouter);
 app.use(weatherRouter);
 app.use(placesRouter);
 app.use(authRouter);

@@ -67,6 +67,7 @@ const healthyApiCount = computed(() => {
   if (apis.value.weather.status === 'ok') count++
   if (apis.value.googlePlaces.status === 'ok') count++
   if (apis.value.googleAuth.connected) count++
+  if (apis.value.carRouting?.status === 'ok' || apis.value.carRouting?.status === 'degraded') count++
   return count
 })
 </script>
@@ -146,8 +147,8 @@ const healthyApiCount = computed(() => {
 
       <!-- Collapsed pill contents -->
       <div v-if="isRightCollapsed" class="dev-hud-pill-body" @click="toggleRightCollapse">
-        <span class="badge" :class="healthyApiCount >= 4 ? 'badge--ok' : 'badge--mock'">
-          {{ healthyApiCount }}/5 OK
+        <span class="badge" :class="healthyApiCount >= 5 ? 'badge--ok' : 'badge--mock'">
+          {{ healthyApiCount }}/6 OK
         </span>
         <span class="hud-meta">{{ latencyMs }}ms</span>
       </div>
@@ -167,6 +168,15 @@ const healthyApiCount = computed(() => {
           <span class="hud-value">{{ apis?.csaTransit.backend || 'in-memory' }}</span>
           <span class="badge" :class="apis?.csaTransit.ready ? 'badge--ok' : 'badge--mock'">
             {{ apis?.csaTransit.ready ? 'READY' : 'LOADING' }}
+          </span>
+        </div>
+
+        <!-- Car Routing -->
+        <div class="dev-hud-row">
+          <span class="hud-label">CAR ROUTE:</span>
+          <span class="hud-value">{{ apis?.carRouting?.provider || 'OSRM' }}</span>
+          <span class="badge" :class="apis?.carRouting?.status === 'ok' ? 'badge--ok' : (apis?.carRouting?.status === 'degraded' ? 'badge--mock' : 'badge--error')">
+            {{ apis?.carRouting?.status === 'ok' ? 'LIVE' : (apis?.carRouting?.status === 'degraded' ? 'FALLBACK' : 'ERR') }}
           </span>
         </div>
 

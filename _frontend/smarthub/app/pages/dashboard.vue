@@ -76,6 +76,17 @@ const transportMode = computed(() => activeRoutine.value?.transportMode)
             </div>
           </div>
         </div>
+        <div v-else-if="preview.carRoute" class="route-card">
+          <div><i class="fa-solid fa-car" style="color: var(--color-primary); margin-right: 6px;"></i><strong>Car Route ({{ preview.carRoute.summary }})</strong></div>
+          <div><strong>Departure:</strong> {{ preview.carRoute.departureTime }} → <strong>Arrival:</strong> {{ preview.carRoute.arrivalTime }}</div>
+          <div><strong>Travel Time:</strong> {{ Math.round(preview.carRoute.durationInTrafficSeconds / 60) }} minutes ({{ (preview.carRoute.distanceMeters / 1000).toFixed(1) }} km)</div>
+          <div v-if="preview.carRoute.trafficDelayMinutes > 0" style="color: var(--color-error); font-weight: 500;">
+            Traffic delay: +{{ preview.carRoute.trafficDelayMinutes }} min ({{ preview.carRoute.trafficCondition }})
+          </div>
+          <div v-else style="color: var(--color-primary); font-weight: 500;">
+            Normal traffic conditions
+          </div>
+        </div>
         <div v-else>No routes found</div>
       </div>
 

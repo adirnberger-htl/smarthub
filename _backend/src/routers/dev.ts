@@ -4,6 +4,7 @@ import { globalKnxService } from '../services/knx-service.js';
 import { globalCSARouter } from '../repo/csa-router.js';
 import { getWeatherStatus } from '../repo/weather-repo.js';
 import { getPlacesStatus } from '../repo/places-repo.js';
+import { getCarRoutingStatus } from '../repo/car-router.js';
 import { findGoogleAccountByUserId } from '../repo/auth-repo.js';
 
 const router = Router();
@@ -17,6 +18,7 @@ router.get('/api/dev/status', requireAuth, (req: AuthenticatedRequest, res: Resp
   const knxStatus = globalKnxService.getConnectionStatus();
   const weatherStatus = getWeatherStatus();
   const placesStatus = getPlacesStatus();
+  const carStatus = getCarRoutingStatus();
 
   return res.json({
     timestamp: new Date().toISOString(),
@@ -32,6 +34,7 @@ router.get('/api/dev/status', requireAuth, (req: AuthenticatedRequest, res: Resp
         ready: globalCSARouter.ready,
         backend: 'csa-in-memory',
       },
+      carRouting: carStatus,
       weather: weatherStatus,
       googlePlaces: placesStatus,
       googleAuth: {

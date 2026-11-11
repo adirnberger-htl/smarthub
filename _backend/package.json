@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "tsx src/app.ts",
     "start": "node dist/app.js",
-    "test": "tsx --test tests/dev-status.test.ts tests/route-perf.bench.ts",
+    "test": "tsx --test tests/dev-status.test.ts tests/car-router.test.ts tests/car-route.test.ts tests/car-workflow-e2e.test.ts tests/route-perf.bench.ts",
     "test:perf": "tsx --test tests/route-perf.bench.ts"
   },
   "dependencies": {

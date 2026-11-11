@@ -12,6 +12,26 @@ export interface AutocompleteResult {
   place_id: string
 }
 
+export interface CarRouteStep {
+  instruction: string
+  distanceMeters: number
+  durationSeconds: number
+}
+
+export interface CarRouteResponse {
+  departureTime: string
+  arrivalTime: string
+  durationSeconds: number
+  durationInTrafficSeconds: number
+  distanceMeters: number
+  trafficCondition: 'normal' | 'moderate' | 'heavy'
+  trafficDelayMinutes: number
+  summary: string
+  steps: CarRouteStep[]
+  provider: 'google' | 'osrm'
+  timestamp: string
+}
+
 export type DeviceCategory = 'light' | 'outlet' | 'blind'
 export type DeviceCapability = 'switch' | 'brightness' | 'rgb' | 'blind_move' | 'blind_angle'
 export type BlindAction = 'up' | 'down' | 'stop' | 'stepUp' | 'stepDown'
@@ -68,6 +88,14 @@ export interface DevStatusResponse {
       status: 'ok' | 'loading' | 'error'
       ready: boolean
       backend: string
+    }
+    carRouting?: {
+      provider: string
+      keyConfigured: boolean
+      cachedEntries: number
+      lastSuccess: string | null
+      lastError: string | null
+      status: 'ok' | 'degraded' | 'error'
     }
     weather: {
       provider: string
@@ -254,6 +282,17 @@ export function useSmarthubApi() {
     return request<DevStatusResponse>('GET', '/api/dev/status', {})
   }
 
+  const fetchCarRoute = async (params: {
+    lat_a: number
+    lon_a: number
+    lat_b: number
+    lon_b: number
+    arrival_time?: string
+    departure_time?: string
+  }): Promise<CarRouteResponse> => {
+    return request<CarRouteResponse>('GET', '/api/car/route', { query: params })
+  }
+
   return {
     get,
     post,
@@ -262,6 +301,7 @@ export function useSmarthubApi() {
     geocodePlace,
     autocompletePlace,
     fetchServiceStatus,
+    fetchCarRoute,
     login,
     register,
     logout,

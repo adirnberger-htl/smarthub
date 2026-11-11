@@ -266,6 +266,8 @@ interface OsdState {
   blindAngle: number
   timerRevision: number
   isCountingDown: boolean
+  isStandalone: boolean
+  standaloneStep: number
   learningAction: OsdHardwareAction | null
   keymap: OsdKeymap
   sseConnected: boolean
@@ -382,6 +384,8 @@ export function useDeviceOsd() {
     blindAngle: 0,
     timerRevision: 0,
     isCountingDown: false,
+    isStandalone: false,
+    standaloneStep: 0,
     learningAction: null,
     keymap: { ...DEFAULT_OSD_KEYMAP },
     sseConnected: false,
@@ -553,6 +557,8 @@ export function useDeviceOsd() {
         state.value.mode = 'IDLE'
         state.value.activeDeviceId = null
         state.value.isCountingDown = false
+        state.value.isStandalone = false
+        state.value.standaloneStep = 0
       }, countdownMs)
     }, idleWaitMs)
   }
@@ -583,6 +589,8 @@ export function useDeviceOsd() {
     state.value.mode = 'IDLE'
     state.value.activeDeviceId = null
     state.value.isCountingDown = false
+    state.value.isStandalone = false
+    state.value.standaloneStep = 0
   }
 
   function dispatchKnobCommandDebounced(id: string, cmd: DeviceCommandDTO, debounceMs = 700) {
@@ -616,9 +624,22 @@ export function useDeviceOsd() {
       return
     }
     const slot = state.value.slotOrder[slotIdx]!
+    state.value.isStandalone = false
+    state.value.standaloneStep = 0
     state.value.activeSlotIndex = slotIdx
     state.value.mode = slot
     state.value.activeDeviceId = KNOB_SLOT_METADATA[slot].deviceId
+    resetAutoHideTimer()
+  }
+
+  function enterStandaloneSlot(slot: OsdKnobSlot) {
+    flushPendingKnobCommands()
+    state.value.isStandalone = true
+    state.value.standaloneStep = 0
+    state.value.mode = slot
+    state.value.activeDeviceId = KNOB_SLOT_METADATA[slot].deviceId
+    const idx = state.value.slotOrder.indexOf(slot)
+    state.value.activeSlotIndex = idx >= 0 ? idx : 0
     resetAutoHideTimer()
   }
 
@@ -630,6 +651,8 @@ export function useDeviceOsd() {
     const dev = state.value.devices[deviceId]
     const nextOn = !(dev?.state.on ?? false)
     if (dev) dev.state.on = nextOn
+    state.value.isStandalone = false
+    state.value.standaloneStep = 0
     state.value.mode = 'TOAST'
     state.value.toastKind = 'device'
     state.value.sceneChips = []
@@ -644,6 +667,8 @@ export function useDeviceOsd() {
   function executeBlindMove(direction: 'up' | 'down') {
     const dev = state.value.devices['blinds-all']
     if (dev) dev.state.lastAction = direction
+    state.value.isStandalone = false
+    state.value.standaloneStep = 0
     state.value.mode = 'TOAST'
     state.value.toastKind = 'device'
     state.value.sceneChips = []
@@ -725,6 +750,8 @@ export function useDeviceOsd() {
         api.sendDeviceCommand('room-leds', { on: false }).then(applySingleDeviceState).catch(() => {})
       }
 
+      state.value.isStandalone = false
+      state.value.standaloneStep = 0
       state.value.mode = 'TOAST'
       state.value.toastKind = 'scene_saved'
       state.value.activeDeviceId = null
@@ -808,6 +835,8 @@ export function useDeviceOsd() {
       },
     ]
 
+    state.value.isStandalone = false
+    state.value.standaloneStep = 0
     state.value.mode = 'TOAST'
     state.value.toastKind = 'scene_restored'
     state.value.activeDeviceId = null
@@ -913,6 +942,33 @@ export function useDeviceOsd() {
         hideOsdImmediately()
         return
       }
+
+      // Standalone mode knob click handling
+      if (state.value.visible && state.value.isStandalone) {
+        if (state.value.mode === 'blind_angle' || state.value.mode === 'desk_brightness') {
+          hideOsdImmediately()
+          return
+        }
+        if (state.value.mode === 'led_rgb' || state.value.mode === 'led_brightness') {
+          if (state.value.standaloneStep === 0) {
+            flushPendingKnobCommands()
+            const counterpart: OsdKnobSlot =
+              state.value.mode === 'led_rgb' ? 'led_brightness' : 'led_rgb'
+            state.value.mode = counterpart
+            state.value.activeDeviceId = KNOB_SLOT_METADATA[counterpart].deviceId
+            const idx = state.value.slotOrder.indexOf(counterpart)
+            state.value.activeSlotIndex = idx >= 0 ? idx : 0
+            state.value.standaloneStep = 1
+            resetAutoHideTimer()
+            return
+          }
+          hideOsdImmediately()
+          return
+        }
+        hideOsdImmediately()
+        return
+      }
+
       if (!state.value.visible || state.value.mode === 'IDLE') {
         enterSlotByIndex(0)
         return
@@ -934,16 +990,17 @@ export function useDeviceOsd() {
         const activeId = state.value.activeDeviceId
         const dev = activeId ? state.value.devices[activeId] : null
         if (dev?.id === 'blinds-all') {
-          const idx = state.value.slotOrder.indexOf('blind_angle')
-          enterSlotByIndex(idx >= 0 ? idx : 0)
+          enterStandaloneSlot('blind_angle')
         } else if (dev?.id === 'desk-light' && dev.state.on) {
-          const idx = state.value.slotOrder.indexOf('desk_brightness')
-          enterSlotByIndex(idx >= 0 ? idx : 0)
+          enterStandaloneSlot('desk_brightness')
         } else if (dev?.id === 'room-leds' && dev.state.on) {
-          const firstLedIdx = state.value.slotOrder.findIndex(
-            (s) => s === 'led_rgb' || s === 'led_brightness'
-          )
-          enterSlotByIndex(firstLedIdx >= 0 ? firstLedIdx : 0)
+          const firstLed =
+            state.value.slotOrder.find((s) => s === 'led_rgb' || s === 'led_brightness') ??
+            'led_rgb'
+          enterStandaloneSlot(firstLed)
+        } else if (dev?.id === 'ceiling-light') {
+          // Ceiling light has no dimmer; keep toast as-is without entering slot
+          return
         } else {
           enterSlotByIndex(0)
         }
@@ -951,7 +1008,10 @@ export function useDeviceOsd() {
         enterSlotByIndex(0)
       }
 
-      const activeSlot = state.value.slotOrder[state.value.activeSlotIndex] ?? 'blind_angle'
+      const activeSlot: OsdKnobSlot =
+        state.value.mode !== 'IDLE' && state.value.mode !== 'TOAST'
+          ? (state.value.mode as OsdKnobSlot)
+          : (state.value.slotOrder[state.value.activeSlotIndex] ?? 'blind_angle')
       applySlotKnobTurn(activeSlot, dir)
     }
   }
@@ -1129,6 +1189,7 @@ export function useDeviceOsd() {
     destroyDeviceOsd,
     triggerAction,
     enterSlotByIndex,
+    enterStandaloneSlot,
     moveKnobSlot,
     setKeyBinding,
     resetKeymapToDefaults,
