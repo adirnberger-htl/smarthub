@@ -12,6 +12,27 @@ export interface AutocompleteResult {
   place_id: string
 }
 
+export interface CarRouteStep {
+  instruction: string
+  distanceMeters: number
+  durationSeconds: number
+}
+
+export interface CarRouteResponse {
+  departureTime: string
+  arrivalTime: string
+  durationSeconds: number
+  durationInTrafficSeconds: number
+  distanceMeters: number
+  trafficCondition: 'normal' | 'moderate' | 'heavy'
+  trafficDelayMinutes: number
+  summary: string
+  steps: CarRouteStep[]
+  geometry?: [number, number][]
+  provider: 'google' | 'osrm'
+  timestamp: string
+}
+
 export type DeviceCategory = 'light' | 'outlet' | 'blind'
 export type DeviceCapability = 'switch' | 'brightness' | 'rgb' | 'blind_move' | 'blind_angle'
 export type BlindAction = 'up' | 'down' | 'stop' | 'stepUp' | 'stepDown'
@@ -41,6 +62,62 @@ export interface DeviceCommandDTO {
   rgb?: string
   blindAction?: BlindAction
   slatAngle?: number
+}
+
+export interface KnxConnectionStatusDTO {
+  enabled: boolean
+  connected: boolean
+  protocol: string
+  multicastIp: string
+  port: number
+  physAddr: string
+  lastTelegram: string | null
+  updatedAt: string
+}
+
+export interface DevStatusResponse {
+  timestamp: string
+  knx: KnxConnectionStatusDTO
+  apis: {
+    backend: {
+      status: 'ok' | 'error'
+      uptimeSeconds: number
+      timestamp: string
+      latencyMs?: number
+    }
+    csaTransit: {
+      status: 'ok' | 'loading' | 'error'
+      ready: boolean
+      backend: string
+    }
+    carRouting?: {
+      provider: string
+      keyConfigured: boolean
+      cachedEntries: number
+      lastSuccess: string | null
+      lastError: string | null
+      status: 'ok' | 'degraded' | 'error'
+    }
+    weather: {
+      provider: string
+      cachedEntries: number
+      lastSuccess: string | null
+      lastError: string | null
+      status: 'ok' | 'error'
+    }
+    googlePlaces: {
+      provider: string
+      keyConfigured: boolean
+      cachedEntries: number
+      lastError: string | null
+      status: 'ok' | 'missing_key' | 'error'
+    }
+    googleAuth: {
+      status: 'ok' | 'not_connected'
+      connected: boolean
+      email: string | null
+    }
+  }
 }
 
 export interface KnxEnvironmentDTO {
@@ -202,6 +279,21 @@ export function useSmarthubApi() {
     return buildUrl('/api/devices/events')
   }
 
+  const fetchDevStatus = async (): Promise<DevStatusResponse> => {
+    return request<DevStatusResponse>('GET', '/api/dev/status', {})
+  }
+
+  const fetchCarRoute = async (params: {
+    lat_a: number
+    lon_a: number
+    lat_b: number
+    lon_b: number
+    arrival_time?: string
+    departure_time?: string
+  }): Promise<CarRouteResponse> => {
+    return request<CarRouteResponse>('GET', '/api/car/route', { query: params })
+  }
+
   return {
     get,
     post,
@@ -210,6 +302,7 @@ export function useSmarthubApi() {
     geocodePlace,
     autocompletePlace,
     fetchServiceStatus,
+    fetchCarRoute,
     login,
     register,
     logout,
@@ -224,5 +317,6 @@ export function useSmarthubApi() {
     fetchDevices,
     sendDeviceCommand,
     getDevicesEventsUrl,
+    fetchDevStatus,
   }
 }

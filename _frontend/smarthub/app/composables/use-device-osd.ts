@@ -266,6 +266,8 @@ interface OsdState {
   blindAngle: number
   timerRevision: number
   isCountingDown: boolean
+  isStandalone: boolean
+  standaloneStep: number
   learningAction: OsdHardwareAction | null
   keymap: OsdKeymap
   sseConnected: boolean
@@ -277,12 +279,11 @@ let eventSource: EventSource | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 let listenerAttached = false
 
-const throttleState = new Map<
+const knobDebounceState = new Map<
   string,
   {
-    lastSent: number
     timer: ReturnType<typeof setTimeout> | null
-    pendingCmd: DeviceCommandDTO | null
+    pendingCmd: DeviceCommandDTO
   }
 >()
 
@@ -383,6 +384,8 @@ export function useDeviceOsd() {
     blindAngle: 0,
     timerRevision: 0,
     isCountingDown: false,
+    isStandalone: false,
+    standaloneStep: 0,
     learningAction: null,
     keymap: { ...DEFAULT_OSD_KEYMAP },
     sseConnected: false,
@@ -549,15 +552,31 @@ export function useDeviceOsd() {
       state.value.isCountingDown = true
       state.value.timerRevision += 1
       hideTimer = setTimeout(() => {
+        flushPendingKnobCommands()
         state.value.visible = false
         state.value.mode = 'IDLE'
         state.value.activeDeviceId = null
         state.value.isCountingDown = false
+        state.value.isStandalone = false
+        state.value.standaloneStep = 0
       }, countdownMs)
     }, idleWaitMs)
   }
 
+  function flushPendingKnobCommands() {
+    if (knobDebounceState.size === 0) return
+    const entries = Array.from(knobDebounceState.entries())
+    knobDebounceState.clear()
+    for (const [id, entry] of entries) {
+      if (entry.timer) {
+        clearTimeout(entry.timer)
+      }
+      api.sendDeviceCommand(id, entry.pendingCmd).then(applySingleDeviceState).catch(() => {})
+    }
+  }
+
   function hideOsdImmediately() {
+    flushPendingKnobCommands()
     if (hideTimer) {
       clearTimeout(hideTimer)
       hideTimer = null
@@ -570,51 +589,57 @@ export function useDeviceOsd() {
     state.value.mode = 'IDLE'
     state.value.activeDeviceId = null
     state.value.isCountingDown = false
+    state.value.isStandalone = false
+    state.value.standaloneStep = 0
   }
 
-  function dispatchCommandThrottled(id: string, cmd: DeviceCommandDTO, throttleMs = 150) {
-    const now = Date.now()
-    const entry = throttleState.get(id) ?? {
-      lastSent: 0,
-      timer: null,
-      pendingCmd: null,
+  function dispatchKnobCommandDebounced(id: string, cmd: DeviceCommandDTO, debounceMs = 700) {
+    const existing = knobDebounceState.get(id)
+    if (existing?.timer) {
+      clearTimeout(existing.timer)
     }
 
-    const elapsed = now - entry.lastSent
-    if (elapsed >= throttleMs && !entry.timer) {
-      entry.lastSent = now
-      throttleState.set(id, entry)
-      api.sendDeviceCommand(id, cmd).then(applySingleDeviceState).catch(() => {})
-      return
+    const mergedCmd: DeviceCommandDTO = {
+      ...(existing?.pendingCmd ?? {}),
+      ...cmd,
     }
 
-    entry.pendingCmd = { ...(entry.pendingCmd ?? {}), ...cmd }
-    if (!entry.timer) {
-      const wait = Math.max(10, throttleMs - elapsed)
-      entry.timer = setTimeout(() => {
-        const latest = throttleState.get(id)
-        if (!latest) return
-        const payload = latest.pendingCmd
-        latest.timer = null
-        latest.pendingCmd = null
-        latest.lastSent = Date.now()
-        if (payload) {
-          api.sendDeviceCommand(id, payload).then(applySingleDeviceState).catch(() => {})
-        }
-      }, wait)
-    }
-    throttleState.set(id, entry)
+    const timer = setTimeout(() => {
+      const current = knobDebounceState.get(id)
+      if (!current) return
+      knobDebounceState.delete(id)
+      api.sendDeviceCommand(id, current.pendingCmd).then(applySingleDeviceState).catch(() => {})
+    }, debounceMs)
+
+    knobDebounceState.set(id, {
+      timer,
+      pendingCmd: mergedCmd,
+    })
   }
 
   function enterSlotByIndex(slotIdx: number) {
+    flushPendingKnobCommands()
     if (slotIdx < 0 || slotIdx >= state.value.slotOrder.length) {
       hideOsdImmediately()
       return
     }
     const slot = state.value.slotOrder[slotIdx]!
+    state.value.isStandalone = false
+    state.value.standaloneStep = 0
     state.value.activeSlotIndex = slotIdx
     state.value.mode = slot
     state.value.activeDeviceId = KNOB_SLOT_METADATA[slot].deviceId
+    resetAutoHideTimer()
+  }
+
+  function enterStandaloneSlot(slot: OsdKnobSlot) {
+    flushPendingKnobCommands()
+    state.value.isStandalone = true
+    state.value.standaloneStep = 0
+    state.value.mode = slot
+    state.value.activeDeviceId = KNOB_SLOT_METADATA[slot].deviceId
+    const idx = state.value.slotOrder.indexOf(slot)
+    state.value.activeSlotIndex = idx >= 0 ? idx : 0
     resetAutoHideTimer()
   }
 
@@ -626,6 +651,8 @@ export function useDeviceOsd() {
     const dev = state.value.devices[deviceId]
     const nextOn = !(dev?.state.on ?? false)
     if (dev) dev.state.on = nextOn
+    state.value.isStandalone = false
+    state.value.standaloneStep = 0
     state.value.mode = 'TOAST'
     state.value.toastKind = 'device'
     state.value.sceneChips = []
@@ -640,6 +667,8 @@ export function useDeviceOsd() {
   function executeBlindMove(direction: 'up' | 'down') {
     const dev = state.value.devices['blinds-all']
     if (dev) dev.state.lastAction = direction
+    state.value.isStandalone = false
+    state.value.standaloneStep = 0
     state.value.mode = 'TOAST'
     state.value.toastKind = 'device'
     state.value.sceneChips = []
@@ -721,6 +750,8 @@ export function useDeviceOsd() {
         api.sendDeviceCommand('room-leds', { on: false }).then(applySingleDeviceState).catch(() => {})
       }
 
+      state.value.isStandalone = false
+      state.value.standaloneStep = 0
       state.value.mode = 'TOAST'
       state.value.toastKind = 'scene_saved'
       state.value.activeDeviceId = null
@@ -804,6 +835,8 @@ export function useDeviceOsd() {
       },
     ]
 
+    state.value.isStandalone = false
+    state.value.standaloneStep = 0
     state.value.mode = 'TOAST'
     state.value.toastKind = 'scene_restored'
     state.value.activeDeviceId = null
@@ -823,7 +856,7 @@ export function useDeviceOsd() {
         dev.state.lastAction = dir > 0 ? 'stepDown' : 'stepUp'
       }
       resetAutoHideTimer()
-      dispatchCommandThrottled('blinds-all', { slatAngle: nextAngle })
+      dispatchKnobCommandDebounced('blinds-all', { slatAngle: nextAngle })
       return
     }
 
@@ -836,7 +869,7 @@ export function useDeviceOsd() {
         dev.state.on = nextBrightness > 0
       }
       resetAutoHideTimer()
-      dispatchCommandThrottled('desk-light', { brightness: nextBrightness })
+      dispatchKnobCommandDebounced('desk-light', { brightness: nextBrightness })
       return
     }
 
@@ -851,7 +884,7 @@ export function useDeviceOsd() {
         dev.state.rgb = nextHex
       }
       resetAutoHideTimer()
-      dispatchCommandThrottled('room-leds', { rgb: nextHex })
+      dispatchKnobCommandDebounced('room-leds', { rgb: nextHex })
       return
     }
 
@@ -864,11 +897,15 @@ export function useDeviceOsd() {
         dev.state.on = nextBrightness > 0
       }
       resetAutoHideTimer()
-      dispatchCommandThrottled('room-leds', { brightness: nextBrightness })
+      dispatchKnobCommandDebounced('room-leds', { brightness: nextBrightness })
     }
   }
 
   function triggerAction(action: OsdHardwareAction) {
+    if (action !== 'knob_cw' && action !== 'knob_ccw') {
+      flushPendingKnobCommands()
+    }
+
     if (action === 'btn1_main_light') {
       executeLightToggle('ceiling-light', 'Deckenlicht KZ West', 'fa-solid fa-lightbulb')
       return
@@ -905,6 +942,33 @@ export function useDeviceOsd() {
         hideOsdImmediately()
         return
       }
+
+      // Standalone mode knob click handling
+      if (state.value.visible && state.value.isStandalone) {
+        if (state.value.mode === 'blind_angle' || state.value.mode === 'desk_brightness') {
+          hideOsdImmediately()
+          return
+        }
+        if (state.value.mode === 'led_rgb' || state.value.mode === 'led_brightness') {
+          if (state.value.standaloneStep === 0) {
+            flushPendingKnobCommands()
+            const counterpart: OsdKnobSlot =
+              state.value.mode === 'led_rgb' ? 'led_brightness' : 'led_rgb'
+            state.value.mode = counterpart
+            state.value.activeDeviceId = KNOB_SLOT_METADATA[counterpart].deviceId
+            const idx = state.value.slotOrder.indexOf(counterpart)
+            state.value.activeSlotIndex = idx >= 0 ? idx : 0
+            state.value.standaloneStep = 1
+            resetAutoHideTimer()
+            return
+          }
+          hideOsdImmediately()
+          return
+        }
+        hideOsdImmediately()
+        return
+      }
+
       if (!state.value.visible || state.value.mode === 'IDLE') {
         enterSlotByIndex(0)
         return
@@ -926,16 +990,17 @@ export function useDeviceOsd() {
         const activeId = state.value.activeDeviceId
         const dev = activeId ? state.value.devices[activeId] : null
         if (dev?.id === 'blinds-all') {
-          const idx = state.value.slotOrder.indexOf('blind_angle')
-          enterSlotByIndex(idx >= 0 ? idx : 0)
+          enterStandaloneSlot('blind_angle')
         } else if (dev?.id === 'desk-light' && dev.state.on) {
-          const idx = state.value.slotOrder.indexOf('desk_brightness')
-          enterSlotByIndex(idx >= 0 ? idx : 0)
+          enterStandaloneSlot('desk_brightness')
         } else if (dev?.id === 'room-leds' && dev.state.on) {
-          const firstLedIdx = state.value.slotOrder.findIndex(
-            (s) => s === 'led_rgb' || s === 'led_brightness'
-          )
-          enterSlotByIndex(firstLedIdx >= 0 ? firstLedIdx : 0)
+          const firstLed =
+            state.value.slotOrder.find((s) => s === 'led_rgb' || s === 'led_brightness') ??
+            'led_rgb'
+          enterStandaloneSlot(firstLed)
+        } else if (dev?.id === 'ceiling-light') {
+          // Ceiling light has no dimmer; keep toast as-is without entering slot
+          return
         } else {
           enterSlotByIndex(0)
         }
@@ -943,7 +1008,10 @@ export function useDeviceOsd() {
         enterSlotByIndex(0)
       }
 
-      const activeSlot = state.value.slotOrder[state.value.activeSlotIndex] ?? 'blind_angle'
+      const activeSlot: OsdKnobSlot =
+        state.value.mode !== 'IDLE' && state.value.mode !== 'TOAST'
+          ? (state.value.mode as OsdKnobSlot)
+          : (state.value.slotOrder[state.value.activeSlotIndex] ?? 'blind_angle')
       applySlotKnobTurn(activeSlot, dir)
     }
   }
@@ -1031,6 +1099,17 @@ export function useDeviceOsd() {
         }
       })
 
+      eventSource.addEventListener('knx-status', (evt: MessageEvent) => {
+        try {
+          const status = JSON.parse(evt.data)
+          if (status && typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('smarthub-knx-status', { detail: status }))
+          }
+        } catch {
+          // Ignore malformed JSON
+        }
+      })
+
       eventSource.onerror = () => {
         state.value.sseConnected = false
         if (eventSource) {
@@ -1074,6 +1153,7 @@ export function useDeviceOsd() {
   }
 
   function destroyDeviceOsd() {
+    flushPendingKnobCommands()
     if (!import.meta.client) return
     if (listenerAttached) {
       window.removeEventListener('keydown', handleKeyDown)
@@ -1109,11 +1189,13 @@ export function useDeviceOsd() {
     destroyDeviceOsd,
     triggerAction,
     enterSlotByIndex,
+    enterStandaloneSlot,
     moveKnobSlot,
     setKeyBinding,
     resetKeymapToDefaults,
     startLearningKey,
     cancelLearningKey,
     hideOsdImmediately,
+    flushPendingKnobCommands,
   }
 }

@@ -5,6 +5,7 @@ import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import busRouter from './routers/bus-route.js';
+import carRouter from './routers/car-route.js';
 import weatherRouter from './routers/weather.js';
 import placesRouter from './routers/places.js';
 import { closeDb, getDb } from './db/sqlite.js';
@@ -12,6 +13,7 @@ import authRouter from './routers/auth.js';
 import routinesRouter from './routers/routines.js';
 import settingsRouter from './routers/settings.js';
 import devicesRouter from './routers/devices.js';
+import devRouter from './routers/dev.js';
 import { globalCSARouter } from './repo/csa-router.js';
 import { globalKnxService } from './services/knx-service.js';
 
@@ -58,12 +60,14 @@ globalCSARouter.loadGraph().catch(console.error);
 globalKnxService.start();
 
 app.use(busRouter);
+app.use(carRouter);
 app.use(weatherRouter);
 app.use(placesRouter);
 app.use(authRouter);
 app.use(routinesRouter);
 app.use(settingsRouter);
 app.use(devicesRouter);
+app.use(devRouter);
 
 process.on('SIGINT', async () => {
     console.log('Shutting down...');

@@ -6,6 +6,7 @@ import {
   DeviceValidationError,
   globalDeviceService,
 } from '../services/device-service.js';
+import { globalKnxService } from '../services/knx-service.js';
 
 const router = Router();
 
@@ -36,6 +37,9 @@ router.get('/api/devices/events', requireAuth, (req: AuthenticatedRequest, res: 
   res.write(
     `event: environment-state\ndata: ${JSON.stringify(globalDeviceService.getEnvironment())}\n\n`
   );
+  res.write(
+    `event: knx-status\ndata: ${JSON.stringify(globalKnxService.getConnectionStatus())}\n\n`
+  );
 
   const onState = (device: SmartDeviceDTO) => {
     res.write(`event: device-state\ndata: ${JSON.stringify(device)}\n\n`);
@@ -45,8 +49,13 @@ router.get('/api/devices/events', requireAuth, (req: AuthenticatedRequest, res: 
     res.write(`event: environment-state\ndata: ${JSON.stringify(env)}\n\n`);
   };
 
+  const onKnxStatus = (status: unknown) => {
+    res.write(`event: knx-status\ndata: ${JSON.stringify(status)}\n\n`);
+  };
+
   globalDeviceService.on('device-state', onState);
   globalDeviceService.on('environment-state', onEnv);
+  globalDeviceService.on('knx-status', onKnxStatus);
 
   const heartbeat = setInterval(() => {
     res.write(': keep-alive\n\n');
@@ -56,6 +65,7 @@ router.get('/api/devices/events', requireAuth, (req: AuthenticatedRequest, res: 
     clearInterval(heartbeat);
     globalDeviceService.off('device-state', onState);
     globalDeviceService.off('environment-state', onEnv);
+    globalDeviceService.off('knx-status', onKnxStatus);
   });
 });
 

@@ -23,9 +23,13 @@ export default defineNuxtConfig({
   runtimeConfig: {
     public: {
       apiBaseUrl: '',
+      cartoKey: '',
     },
   },
   vite: {
+    optimizeDeps: {
+      include: ['three', 'leaflet'],
+    },
     server: {
       proxy: {
         '/api': {

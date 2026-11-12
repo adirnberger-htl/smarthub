@@ -7,19 +7,23 @@
     <SettingsButton v-if="$route.path !== '/login'" />
     <ProfileButton v-if="$route.path === '/settings'" />
     <DeviceOsdOverlay v-if="$route.path !== '/login'" />
+    <DevStatusOverlay v-if="globalSettings.devOverlayEnabled && $route.path !== '/login'" />
   </div>
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useHead } from '#app'
 import { useSettings } from './composables/use-settings'
 import SettingsButton from './components/settings-button.vue'
 import ProfileButton from './components/profile-button.vue'
 import DeviceOsdOverlay from './components/device-osd-overlay.vue'
+import DevStatusOverlay from './components/dev-status-overlay.vue'
 
 const route = useRoute()
 const { getGlobalSettings, resolvedTheme } = useSettings()
+const globalSettings = computed(() => getGlobalSettings())
 useHead({
   htmlAttrs: {
     'data-theme': resolvedTheme

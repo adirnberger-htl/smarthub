@@ -48,6 +48,7 @@ export interface IndexedFootpath {
 interface CacheMetadata {
   version: number;
   sourceMtimeMs: number;
+  datasetFingerprint?: string;
   stops: Array<{ id: string; name: string; lat: number; lon: number }>;
   trips: Array<{ id: string; s: string; l: string; t: number; svc: number }>;
   services: Array<{ id: string; mask: number; start: number; end: number; add: number[]; rem: number[] }>;
@@ -55,7 +56,7 @@ interface CacheMetadata {
   numConnections: number;
 }
 
-const CACHE_VERSION = 2;
+const CACHE_VERSION = 3;
 
 export class CSARouter {
   private stopList: StopData[] = [];
@@ -132,54 +133,144 @@ export class CSARouter {
 
     for (const dir of candidates) {
       if (fs.existsSync(dir)) {
-        const hasLinz = fs.existsSync(path.join(dir, 'LINZ_AG_GTFS_2026')) || fs.existsSync(path.join(dir, 'LINZ_AG_GTFS_2026.zip'));
-        const hasOoevv = fs.existsSync(path.join(dir, 'OOEVV_GTFS_2026')) || fs.existsSync(path.join(dir, 'OOEVV_GTFS_2026.zip'));
-        if (hasLinz || hasOoevv) {
-          return dir;
-        }
+        try {
+          const entries = fs.readdirSync(dir);
+          const hasGtfs = entries.some(e =>
+            e.toLowerCase().endsWith('.zip') ||
+            fs.existsSync(path.join(dir, e, 'stops.txt')) ||
+            this.findGtfsRoot(path.join(dir, e)) !== null
+          );
+          if (hasGtfs) {
+            return dir;
+          }
+        } catch (e) {}
       }
     }
     return null;
   }
 
-  private ensureDatasetExtracted(dataDir: string, folderName: string): string | null {
-    const targetDir = path.join(dataDir, folderName);
-    const stopsFile = path.join(targetDir, 'stops.txt');
-    if (fs.existsSync(stopsFile)) {
-      return targetDir;
+  private findGtfsRoot(dir: string): string | null {
+    if (!fs.existsSync(dir)) return null;
+    try {
+      const stat = fs.statSync(dir);
+      if (!stat.isDirectory()) return null;
+      if (fs.existsSync(path.join(dir, 'stops.txt'))) {
+        return dir;
+      }
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          const subDir = path.join(dir, entry.name);
+          if (fs.existsSync(path.join(subDir, 'stops.txt'))) {
+            return subDir;
+          }
+        }
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  private derivePrefix(name: string): string {
+    const clean = name.replace(/\.zip$/i, '');
+    const firstPart = clean.split(/[-_]/)[0].toUpperCase();
+    return `${firstPart}_`;
+  }
+
+  private ensureDatasetExtracted(dataDir: string, zipOrFolder: string): string | null {
+    const isZip = zipOrFolder.toLowerCase().endsWith('.zip');
+    if (!isZip) {
+      const dirPath = path.join(dataDir, zipOrFolder);
+      return this.findGtfsRoot(dirPath);
     }
-    const zipFile = path.join(dataDir, `${folderName}.zip`);
-    if (fs.existsSync(zipFile)) {
+
+    const zipFile = path.join(dataDir, zipOrFolder);
+    const folderName = path.basename(zipOrFolder, path.extname(zipOrFolder));
+    const targetDir = path.join(dataDir, folderName);
+
+    let gtfsDir = this.findGtfsRoot(targetDir);
+
+    if (!gtfsDir && fs.existsSync(zipFile)) {
       try {
         console.log(`[CSA] Extracting ${zipFile} to ${targetDir}...`);
         fs.mkdirSync(targetDir, { recursive: true });
-        execFileSync('unzip', ['-o', '-q', zipFile, '-d', targetDir]);
-        if (fs.existsSync(stopsFile)) {
-          return targetDir;
-        }
+        execFileSync('unzip', ['-o', '-q', zipFile, '-x', '*shapes.txt', '-d', targetDir]);
+        gtfsDir = this.findGtfsRoot(targetDir);
       } catch (e: any) {
         console.warn(`[CSA] Failed to extract ${zipFile}: ${e.message}`);
       }
     }
-    return null;
+
+    return gtfsDir;
   }
 
-  private getDatasetsLatestMtime(dirs: string[]): number {
+  public discoverDatasets(dataDir: string): Array<{ dir: string; prefix: string; name: string }> {
+    const entries = fs.readdirSync(dataDir);
+    const datasets: Array<{ dir: string; prefix: string; name: string }> = [];
+    const seenNames = new Set<string>();
+
+    for (const entry of entries) {
+      if (entry.toLowerCase().endsWith('.zip')) {
+        const base = path.basename(entry, path.extname(entry));
+        const dir = this.ensureDatasetExtracted(dataDir, entry);
+        if (dir) {
+          const prefix = this.derivePrefix(base);
+          datasets.push({ dir, prefix, name: base });
+          seenNames.add(base.toLowerCase());
+          seenNames.add(path.basename(dir).toLowerCase());
+        }
+      }
+    }
+
+    for (const entry of entries) {
+      if (entry.endsWith('.zip') || entry.startsWith('.') || entry.includes('cache') || entry.includes('sqlite')) continue;
+      const fullPath = path.join(dataDir, entry);
+      try {
+        const stat = fs.statSync(fullPath);
+        if (stat.isDirectory() && !seenNames.has(entry.toLowerCase())) {
+          const dir = this.findGtfsRoot(fullPath);
+          if (dir) {
+            const prefix = this.derivePrefix(entry);
+            datasets.push({ dir, prefix, name: entry });
+            seenNames.add(entry.toLowerCase());
+          }
+        }
+      } catch (e) {}
+    }
+
+    datasets.sort((a, b) => a.name.localeCompare(b.name));
+    return datasets;
+  }
+
+  private getDatasetsLatestMtime(resolvedDirs: Array<{ dir: string; name: string }>, dataDir: string): { maxMtime: number; fingerprint: string } {
     let maxMtime = 0;
     const files = ['stops.txt', 'routes.txt', 'trips.txt', 'stop_times.txt', 'calendar.txt', 'calendar_dates.txt'];
-    for (const d of dirs) {
+    const names = resolvedDirs.map(d => d.name).sort();
+
+    for (const { dir, name } of resolvedDirs) {
+      const zipCandidates = [
+        path.join(dataDir, `${name}.zip`),
+        path.join(dataDir, `${name.toLowerCase()}.zip`)
+      ];
+      for (const z of zipCandidates) {
+        if (fs.existsSync(z)) {
+          const stat = fs.statSync(z);
+          if (stat.mtimeMs > maxMtime) maxMtime = stat.mtimeMs;
+        }
+      }
+
       for (const f of files) {
-        const p = path.join(d, f);
+        const p = path.join(dir, f);
         if (fs.existsSync(p)) {
           const stat = fs.statSync(p);
           if (stat.mtimeMs > maxMtime) maxMtime = stat.mtimeMs;
         }
       }
     }
-    return Math.floor(maxMtime);
+    const fingerprint = names.join('|');
+    return { maxMtime: Math.floor(maxMtime), fingerprint };
   }
 
-  private tryLoadFromDiskCache(dataDir: string, expectedMtime: number): boolean {
+  private tryLoadFromDiskCache(dataDir: string, expectedMtime: number, expectedFingerprint: string): boolean {
     const metaPath = path.join(dataDir, 'csa-graph-cache.meta.json');
     const binPath = path.join(dataDir, 'csa-graph-cache.bin');
     if (!fs.existsSync(metaPath) || !fs.existsSync(binPath)) return false;
@@ -188,7 +279,7 @@ export class CSARouter {
       console.time('[CSA] Load from disk cache');
       const metaRaw = fs.readFileSync(metaPath, 'utf8');
       const meta = JSON.parse(metaRaw) as CacheMetadata;
-      if (meta.version !== CACHE_VERSION || meta.sourceMtimeMs !== expectedMtime) {
+      if (meta.version !== CACHE_VERSION || meta.sourceMtimeMs !== expectedMtime || meta.datasetFingerprint !== expectedFingerprint) {
         console.timeEnd('[CSA] Load from disk cache');
         return false;
       }
@@ -268,13 +359,14 @@ export class CSARouter {
     }
   }
 
-  private saveToDiskCache(dataDir: string, sourceMtimeMs: number): void {
+  private saveToDiskCache(dataDir: string, sourceMtimeMs: number, datasetFingerprint: string): void {
     try {
       const metaPath = path.join(dataDir, 'csa-graph-cache.meta.json');
       const binPath = path.join(dataDir, 'csa-graph-cache.bin');
       const meta: CacheMetadata = {
         version: CACHE_VERSION,
         sourceMtimeMs,
+        datasetFingerprint,
         stops: this.stopList.map(s => ({ id: s.id, name: s.name, lat: s.lat, lon: s.lon })),
         trips: this.tripList.map(t => ({ id: t.id, s: t.route_short_name, l: t.route_long_name, t: t.route_type, svc: t.serviceIdx })),
         services: this.serviceList.map(sv => ({
@@ -360,19 +452,40 @@ export class CSARouter {
     const n = this.stopList.length;
     this.footpathsByStopIdx = new Array(n);
 
+    const cellSize = 0.005;
+    const grid = new Map<string, number[]>();
+    for (let i = 0; i < n; i++) {
+      const s = this.stopList[i];
+      const cx = Math.floor(s.lat / cellSize);
+      const cy = Math.floor(s.lon / cellSize);
+      const key = `${cx}_${cy}`;
+      let list = grid.get(key);
+      if (!list) {
+        list = [];
+        grid.set(key, list);
+      }
+      list.push(i);
+    }
+
     for (let i = 0; i < n; i++) {
       const s1 = this.stopList[i];
       const paths: IndexedFootpath[] = [];
-      for (let j = 0; j < n; j++) {
-        if (i === j) continue;
-        const s2 = this.stopList[j];
-        const latDiff = Math.abs(s1.lat - s2.lat);
-        const lonDiff = Math.abs(s1.lon - s2.lon);
-        if (latDiff > 0.005 || lonDiff > 0.005) continue;
+      const cx = Math.floor(s1.lat / cellSize);
+      const cy = Math.floor(s1.lon / cellSize);
 
-        const dist = this.getDistanceMeters(s1.lat, s1.lon, s2.lat, s2.lon);
-        if (dist <= MAX_TRANSFER_METERS) {
-          paths.push({ toIdx: j, walkTime: Math.round(dist / WALK_SPEED) });
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          const neighbors = grid.get(`${cx + dx}_${cy + dy}`);
+          if (!neighbors) continue;
+          for (let k = 0; k < neighbors.length; k++) {
+            const j = neighbors[k];
+            if (i === j) continue;
+            const s2 = this.stopList[j];
+            const dist = this.getDistanceMeters(s1.lat, s1.lon, s2.lat, s2.lon);
+            if (dist <= MAX_TRANSFER_METERS) {
+              paths.push({ toIdx: j, walkTime: Math.round(dist / WALK_SPEED) });
+            }
+          }
         }
       }
       this.footpathsByStopIdx[i] = paths;
@@ -460,21 +573,13 @@ export class CSARouter {
   }
 
   public async loadFromGTFSFiles(dataDir: string): Promise<boolean> {
-    const datasets = [
-      { folder: 'LINZ_AG_GTFS_2026', prefix: 'LINZ_' },
-      { folder: 'OOEVV_GTFS_2026', prefix: 'OOEVV_' }
-    ];
-
-    const resolvedDirs: Array<{ dir: string; prefix: string }> = [];
-    for (const ds of datasets) {
-      const dir = this.ensureDatasetExtracted(dataDir, ds.folder);
-      if (dir) resolvedDirs.push({ dir, prefix: ds.prefix });
-    }
-
+    const resolvedDirs = this.discoverDatasets(dataDir);
     if (resolvedDirs.length === 0) return false;
 
-    const latestMtime = this.getDatasetsLatestMtime(resolvedDirs.map(d => d.dir));
-    if (this.tryLoadFromDiskCache(dataDir, latestMtime)) {
+    console.log(`[CSA] Discovered ${resolvedDirs.length} GTFS datasets in ${dataDir}: ${resolvedDirs.map(d => `${d.name} (${d.prefix})`).join(', ')}`);
+
+    const { maxMtime: latestMtime, fingerprint } = this.getDatasetsLatestMtime(resolvedDirs, dataDir);
+    if (this.tryLoadFromDiskCache(dataDir, latestMtime, fingerprint)) {
       return true;
     }
 
@@ -650,7 +755,7 @@ export class CSARouter {
     console.timeEnd('[CSA] Direct GTFS build');
     console.log(`[CSA] Direct GTFS graph ready. Stops: ${this.stopList.length}, Trips: ${this.tripList.length}, Services: ${this.serviceList.length}, Connections: ${this.numConnections}`);
 
-    this.saveToDiskCache(dataDir, latestMtime);
+    this.saveToDiskCache(dataDir, latestMtime, fingerprint);
     return true;
   }
 
@@ -1171,26 +1276,45 @@ export class CSARouter {
     }];
   }
 
-  findReverseRoute(startLat: number, startLon: number, endLat: number, endLon: number, targetTimeStr: string, targetDate?: Date | string): any {
-    if (!this.ready) throw new Error('CSA Router not initialized');
+  public scoreRoute(r: any, targetTimeSec: number): number {
+    const durationMin = r.total_duration_minutes ?? 0;
+    const numTransfers = r.num_transfers ?? 0;
 
-    const targetTime = this.timeToSeconds(targetTimeStr);
-    const MAX_WALK_METERS = 1500;
+    let railLegs = 0;
+    if (Array.isArray(r.legs)) {
+      for (const leg of r.legs) {
+        if (leg.route_type === 2 || leg.route_type === 0) {
+          railLegs++;
+        }
+      }
+    }
+
+    const arrSec = this.timeToSeconds(r.arrival_time);
+    const arrivalBufferMin = Math.max(0, Math.round((targetTimeSec - arrSec) / 60));
+
+    // Scoring weights:
+    // Base cost = duration in minutes
+    // + 8 min penalty per transfer
+    // - 12 min comfort bonus if route utilizes rail (type 2) or tram (type 0)
+    // + 0.3 min penalty for every minute arrived before target (slight penalty for arriving too early)
+    const transferPenalty = numTransfers * 8;
+    const railBonus = railLegs > 0 ? 12 : 0;
+    const earlyPenalty = arrivalBufferMin * 0.3;
+
+    return durationMin + transferPenalty - railBonus + earlyPenalty;
+  }
+
+  private scanReverseSingle(
+    startStops: Array<{ stop: StopData; walkTime: number }>,
+    endStops: Array<{ stop: StopData; walkTime: number }>,
+    targetTime: number,
+    activeService: Uint8Array,
+    directWalkDist: number,
+    directWalkTime: number
+  ): any[] {
     const TRANSFER_PENALTY = 120;
     const NEG_INF = -0x3fffffff;
     const INF = 0x3fffffff;
-
-    const directWalkDist = this.getDistanceMeters(startLat, startLon, endLat, endLon);
-    const directWalkTime = Math.round(directWalkDist / 1.4);
-
-    const startStops = this.findStopsWithinRadius(startLat, startLon, MAX_WALK_METERS);
-    const endStops = this.findStopsWithinRadius(endLat, endLon, MAX_WALK_METERS);
-
-    if (startStops.length === 0 || endStops.length === 0) {
-      return [];
-    }
-
-    const activeService = this.getActiveServiceMask(targetDate);
 
     const latestDepartureTime = this.scratchTime;
     const latestDepartureTransfers = this.scratchTransfers;
@@ -1497,6 +1621,85 @@ export class CSARouter {
       arrival_time: finalArrival,
       num_transfers: Math.max(0, groupedLegs.filter(l => l.route_type !== 99).length - 1)
     }];
+  }
+
+  findReverseRoute(
+    startLat: number,
+    startLon: number,
+    endLat: number,
+    endLon: number,
+    targetTimeStr: string,
+    targetDate?: Date | string,
+    minDepTimeStr?: string
+  ): any[] {
+    if (!this.ready) throw new Error('CSA Router not initialized');
+
+    const targetTime = this.timeToSeconds(targetTimeStr);
+    const MAX_WALK_METERS = 1500;
+    const directWalkDist = this.getDistanceMeters(startLat, startLon, endLat, endLon);
+    const directWalkTime = Math.round(directWalkDist / 1.4);
+
+    const startStops = this.findStopsWithinRadius(startLat, startLon, MAX_WALK_METERS);
+    const endStops = this.findStopsWithinRadius(endLat, endLon, MAX_WALK_METERS);
+
+    if (startStops.length === 0 || endStops.length === 0) {
+      return [];
+    }
+
+    const activeService = this.getActiveServiceMask(targetDate);
+
+    // Initial probe at exact targetTime
+    const initialRoutes = this.scanReverseSingle(startStops, endStops, targetTime, activeService, directWalkDist, directWalkTime);
+    if (!initialRoutes || initialRoutes.length === 0) {
+      return [];
+    }
+
+    const firstRoute = initialRoutes[0];
+    if (firstRoute.legs.length === 1 && firstRoute.legs[0].route_short_name === 'Walk') {
+      return initialRoutes;
+    }
+
+    const candidates: any[] = [firstRoute];
+    const minTargetSec = targetTime - 45 * 60; // 45-minute arrival lookback window
+    let currentTargetSec = this.timeToSeconds(firstRoute.arrival_time) - 60;
+
+    for (let probe = 1; probe < 4; probe++) {
+      if (currentTargetSec <= minTargetSec) break;
+
+      const probedRoutes = this.scanReverseSingle(startStops, endStops, currentTargetSec, activeService, directWalkDist, directWalkTime);
+      if (!probedRoutes || probedRoutes.length === 0) break;
+
+      const r = probedRoutes[0];
+      const arrSec = this.timeToSeconds(r.arrival_time);
+      const depSec = this.timeToSeconds(r.departure_time);
+
+      if (arrSec <= depSec) break;
+
+      const exists = candidates.some(c => c.departure_time === r.departure_time && c.arrival_time === r.arrival_time);
+      if (!exists) {
+        candidates.push(r);
+      }
+
+      if (arrSec <= minTargetSec) break;
+      currentTargetSec = arrSec - 60;
+    }
+
+    // Filter by minDepTime if specified
+    let viable = candidates;
+    if (minDepTimeStr) {
+      const minDepSec = this.timeToSeconds(minDepTimeStr);
+      if (minDepSec > 0) {
+        const notPast = candidates.filter(c => this.timeToSeconds(c.departure_time) >= minDepSec);
+        if (notPast.length > 0) {
+          viable = notPast;
+        }
+      }
+    }
+
+    // Rank candidates using utility score (lowest score = best)
+    viable.sort((a, b) => this.scoreRoute(a, targetTime) - this.scoreRoute(b, targetTime));
+
+    return viable;
   }
 }
 

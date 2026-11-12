@@ -42,6 +42,18 @@ function normalizeKey(input: string): string {
   return input.trim().toLowerCase();
 }
 
+export function getPlacesStatus() {
+  const hasKey = Boolean(process.env.GOOGLE_KEY);
+  const lastFailure = Array.from(geocodeFailed.values()).pop();
+  return {
+    provider: 'Google Maps / Places',
+    keyConfigured: hasKey,
+    cachedEntries: geocodeCache.size + autocompleteCache.size,
+    lastError: lastFailure ? String(lastFailure.error?.message || lastFailure.error) : null,
+    status: !hasKey ? 'missing_key' : (lastFailure && (Date.now() - lastFailure.timestamp < FAILURE_TTL) ? 'error' : 'ok'),
+  };
+}
+
 function setBoundedCache<T>(map: Map<string, CacheEntry<T>>, key: string, entry: CacheEntry<T>): void {
   if (map.has(key)) {
     map.delete(key);

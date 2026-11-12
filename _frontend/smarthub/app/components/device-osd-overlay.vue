@@ -138,9 +138,9 @@
           </div>
 
           <!-- Subtle Vertical 4-Segment Side Progress Rail (Knob Click Cycle) -->
-          <!-- Only rendered when cycling knob configuration slots; hidden during pure button toasts -->
+          <!-- Only rendered when cycling knob configuration slots; hidden during pure button toasts and standalone controls -->
           <div
-            v-if="state.mode !== 'TOAST'"
+            v-if="state.mode !== 'TOAST' && !state.isStandalone"
             class="osd-side-rail"
             aria-label="Knob configuration slot progress rail"
           >
@@ -229,7 +229,11 @@ const headerIcon = computed(() => {
 
 const headerEyebrow = computed(() => {
   if (state.value.mode !== 'TOAST' && state.value.mode !== 'IDLE') {
-    return `SLOT ${state.value.activeSlotIndex + 1} OF ${state.value.slotOrder.length} • ${KNOB_SLOT_METADATA[state.value.mode].label.toUpperCase()}`
+    const label = KNOB_SLOT_METADATA[state.value.mode].label.toUpperCase()
+    if (state.value.isStandalone) {
+      return label
+    }
+    return `SLOT ${state.value.activeSlotIndex + 1} OF ${state.value.slotOrder.length} • ${label}`
   }
   if (state.value.toastKind === 'scene_saved' || state.value.toastKind === 'scene_restored') {
     return 'BUTTON 6 • SMART LIGHT SCENE MEMORY'

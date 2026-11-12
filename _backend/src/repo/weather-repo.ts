@@ -76,6 +76,19 @@ const inFlightRequests = new Map<string, Promise<WeatherForecast>>();
 const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
 const FAILURE_TTL = 15 * 1000; // Cache errors/failures for 15 seconds (shorter for faster recovery)
 
+// Check failure cache (negative caching)
+export function getWeatherStatus() {
+  const lastEntry = Array.from(weatherCache.values()).pop();
+  const lastFailure = Array.from(failedRequests.values()).pop();
+  return {
+    provider: 'Open-Meteo',
+    cachedEntries: weatherCache.size,
+    lastSuccess: lastEntry ? new Date(lastEntry.timestamp).toISOString() : null,
+    lastError: lastFailure ? String(lastFailure.error?.message || lastFailure.error) : null,
+    status: lastFailure && (Date.now() - lastFailure.timestamp < FAILURE_TTL) ? 'error' : 'ok',
+  };
+}
+
 // Main function to fetch weather forecast (cached and deduplicated)
 export async function fetchWeatherForecast(lat: number, lon: number): Promise<WeatherForecast> {
   const key = `${lat.toFixed(2)},${lon.toFixed(2)}`;

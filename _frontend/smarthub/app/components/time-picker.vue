@@ -101,7 +101,7 @@ const handleBlur = () => {
 
 .time-input:focus {
   outline: none;
-  background: var(--border-light);
+  background: var(--bg-surface-hover);
   border-radius: 6px;
 }
 

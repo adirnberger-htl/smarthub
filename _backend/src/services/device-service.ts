@@ -51,6 +51,10 @@ export class DeviceService extends EventEmitter {
     globalKnxService.on('knx-environment', (env: KnxEnvironmentDTO) => {
       this.emit('environment-state', env);
     });
+
+    globalKnxService.on('knx-status', (status: unknown) => {
+      this.emit('knx-status', status);
+    });
   }
 
   public listDevices(): SmartDeviceDTO[] {

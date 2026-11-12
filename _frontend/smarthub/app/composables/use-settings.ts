@@ -34,6 +34,7 @@ export type GlobalSettings = {
   weatherLocation: string
   theme: 'light' | 'dark' | 'auto'
   themeSchedule?: { light: string; dark: string }
+  devOverlayEnabled: boolean
 }
 
 export type Settings = {
@@ -88,11 +89,10 @@ function routineItemToApi(item: RoutineItem): Record<string, unknown> {
 
 export function useSettings() {
   const state = useState<Settings>('app-settings', () => ({
-    global: { clockType: 'digital', displaySpeed: 'medium', weatherLocation: 'Linz, Austria', theme: 'light' },
+    global: { clockType: 'digital', displaySpeed: 'medium', weatherLocation: 'Linz, Austria', theme: 'light', devOverlayEnabled: false },
     routines: []
   }))
   
-  const preview = useState<any | null>('app-preview', () => null)
   const currentHM = useState<string>('app-time', () => {
     const d = new Date()
     return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
@@ -138,7 +138,9 @@ export function useSettings() {
         clockType: (settings as any).clockType || 'digital',
         displaySpeed: (settings as any).displaySpeed || (settings as any).scrollSpeed || 'medium',
         weatherLocation: (settings as any).weatherLocation || 'Linz, Austria',
-        theme: (settings as any).theme || 'light'
+        theme: (settings as any).theme || 'light',
+        themeSchedule: (settings as any).themeSchedule,
+        devOverlayEnabled: Boolean((settings as any).devOverlayEnabled)
       }
       state.value.routines = routines.map(apiToRoutineItem)
     } catch (e) {
@@ -166,7 +168,8 @@ export function useSettings() {
         displaySpeed: state.value.global.displaySpeed,
         weatherLocation: state.value.global.weatherLocation,
         theme: state.value.global.theme,
-        themeSchedule: state.value.global.themeSchedule
+        themeSchedule: state.value.global.themeSchedule,
+        devOverlayEnabled: state.value.global.devOverlayEnabled
       })
     } catch (e) {
       console.error('Failed to save settings', e)
@@ -244,25 +247,14 @@ export function useSettings() {
     }
   }
 
-  function setPreview(p: any) {
-    preview.value = p
-  }
-
-  function clearPreview() {
-    preview.value = null
-  }
-
   return {
     state,
-    preview,
     currentHM,
     resolvedTheme,
     getGlobalSettings,
     addRoutineItem,
     updateRoutineItem,
     removeRoutineItem,
-    setPreview,
-    clearPreview,
     saveGlobalSettings,
     loadFromServer,
   }

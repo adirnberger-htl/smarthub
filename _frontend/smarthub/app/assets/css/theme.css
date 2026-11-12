@@ -12,6 +12,7 @@
   /* Typography */
   --text-primary: #1f2937;
   --text-primary-strong: #111827;
+  --text-primary-alt-2: #374151;
   --text-secondary: #4b5563;
   --text-muted: #6b7280;
   --text-light: #9ca3af;
@@ -66,6 +67,7 @@
   /* Typography */
   --text-primary: #f9fafb;
   --text-primary-strong: #ffffff;
+  --text-primary-alt-2: #e5e7eb;
   --text-secondary: #d1d5db;
   --text-muted: #9ca3af;
   --text-light: #6b7280;

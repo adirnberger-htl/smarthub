@@ -191,6 +191,6 @@ onBeforeUnmount(() => {
 }
 
 .autocomplete-item:hover {
-  background-color: var(--border-light);
+  background-color: var(--bg-surface-hover);
 }
 </style>

@@ -6,11 +6,11 @@ Provides high-performance in-memory public transit route calculation (both depar
 ## Requirements
 
 ### Requirement: Direct GTFS and disk-cache graph loading
-The transit routing engine SHALL load GTFS datasets (`stops.txt`, `routes.txt`, `trips.txt`, `calendar.txt`, `calendar_dates.txt`, `stop_times.txt`) directly from the local `/data` directory (or a serialized binary/JSON cache file built from those files) without any external graph database dependency.
+The transit routing engine SHALL dynamically discover all GTFS dataset directories and `.zip` archives directly from the local GTFS data directory (`/data` or configured `GTFS_DATA_DIR`). If a discovered `.zip` archive has not been extracted or has a newer modification time than its corresponding extracted folder, the engine SHALL automatically extract it, automatically resolve any single nested container subdirectory containing GTFS files (such as `GTFS_Fahrplan_2026/`), assign a deterministic agency prefix, and build the unified in-memory routing graph from all discovered GTFS feeds without any external database dependency. The engine SHALL persist and load a serialized binary/JSON disk cache (`csa-graph-cache.bin` and `csa-graph-cache.meta.json`) validated against the composite modification timestamps and composition of all discovered datasets.
 
 #### Scenario: Startup loads from local GTFS data and writes/reads cache
-- **WHEN** the backend starts and GTFS dataset directories or zip archives exist under `/data`
-- **THEN** `CSARouter` initializes its in-memory routing graph from the local GTFS files (or prebuilt cache file) and marks `ready = true`
+- **WHEN** the backend starts and GTFS dataset directories or zip archives (including dynamically discovered feeds like `LINZ_AG_GTFS_2026`, `OOEVV_GTFS_2026`, and `OEBB-gtfs.zip`) exist under `/data`
+- **THEN** `CSARouter` initializes its in-memory routing graph from all discovered GTFS files (or prebuilt binary cache file validated against composite dataset modification timestamps), marks `ready = true`, and reloads in under 500 milliseconds on warm start
 
 #### Scenario: Startup fails gracefully when local GTFS data is absent
 - **WHEN** the backend starts and no GTFS dataset directories, zip archives, or cache files exist under `/data`
@@ -65,3 +65,18 @@ When the in-memory transit routing graph is not yet initialized (`ready = false`
 #### Scenario: Health check endpoint reports CSA in-memory status only
 - **WHEN** a client requests `GET /api/bus/test`
 - **THEN** the endpoint responds with HTTP `200` and `{ "status": "ok" | "loading", "backend": "csa-in-memory", "timestamp": "<ISO-8601>" }` containing no `neo4j` field
+
+### Requirement: Comfort and speed optimized reverse transit routing
+When calculating transit connections for a specified arrival time (`arrival_time`), the transit routing engine SHALL evaluate candidate itineraries arriving within an arrival lookback window (up to 45 minutes prior to target arrival time) and rank them using a composite utility score balancing total travel duration, transit mode comfort (prioritizing rail and tram over buses), and transfer count, returning the highest-utility connection as the primary result.
+
+#### Scenario: Faster rail connection preferred over slightly later slow multi-bus route
+- **WHEN** a route is requested with a target arrival time where an itinerary utilizing rail (S-Bahn, Regionalbahn) or tram achieves substantially lower travel duration than an all-bus connection that departs slightly later
+- **THEN** the routing engine selects and returns the faster, higher-comfort rail/tram itinerary as the top route
+
+#### Scenario: Direct or low-transfer route preferred when durations are comparable
+- **WHEN** candidate connections within the arrival window have comparable travel times
+- **THEN** the routing engine favors itineraries with fewer transfers and departures closest to the target arrival time
+
+#### Scenario: Multi-probe search maintains bounded in-memory latency
+- **WHEN** an arrival-time route search executes multi-probe candidate evaluation against the active GTFS graph
+- **THEN** the complete candidate search and ranking executes in under 10 milliseconds using existing in-memory graph structures

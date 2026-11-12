@@ -5,7 +5,7 @@ import BusWidget from '../components/bus-widget.vue'
 import CarWidget from '../components/car-widget.vue'
 import MotivationWidget from '../components/motivation-widget.vue'
 
-const { preview, clearPreview, state } = useSettings()
+const { state } = useSettings()
 
 const today = ref(new Date().toISOString().slice(0, 10))
 const currentDayOfWeek = ref(new Date().getDay())
@@ -61,24 +61,6 @@ const transportMode = computed(() => activeRoutine.value?.transportMode)
       <appointments-widget class="dashboard__appointments" />
     </div>
     <div class="dashboard__right">
-      <div v-if="preview" class="route-preview">
-        <div class="route-preview__header">
-          <h3>Route Preview</h3>
-          <button @click="clearPreview">Close</button>
-        </div>
-        <div v-if="Array.isArray(preview.routes) && preview.routes.length>0">
-          <div v-for="(r, idx) in preview.routes" :key="idx" class="route-card">
-            <div><strong>Departure:</strong> {{ r.departure_time }} → <strong>Arrival:</strong> {{ r.arrival_time }}</div>
-            <div><strong>Duration:</strong> {{ r.total_duration_minutes }} minutes</div>
-            <div v-for="(leg, i) in r.legs" :key="i" class="leg">
-              <div>{{ leg.board_stop_name }} → {{ leg.alight_stop_name }} ({{ leg.route_short_name }})</div>
-              <div>{{ leg.departure_time }} → {{ leg.arrival_time }}</div>
-            </div>
-          </div>
-        </div>
-        <div v-else>No routes found</div>
-      </div>
-
       <transition name="widget-fade" mode="out-in">
         <bus-widget v-if="transportMode === 'bus'" :routine="activeRoutine" key="bus" />
         <car-widget v-else-if="transportMode === 'car'" :routine="activeRoutine" key="car" />
@@ -120,10 +102,6 @@ const transportMode = computed(() => activeRoutine.value?.transportMode)
   height: 100%;
   min-height: 0;
 }
-
-.route-preview { background: var(--bg-surface); padding:12px; border-radius:8px; margin-bottom:12px; box-shadow: var(--shadow-widget) }
-.route-preview__header { display:flex; justify-content:space-between; align-items:center; color: var(--text-primary) }
-.route-card { padding:8px; border:1px solid var(--border-base); border-radius:6px; margin-bottom:8px; color: var(--text-primary) }
 
 /* Widget transition styles */
 .widget-fade-enter-active,
