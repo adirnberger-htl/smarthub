@@ -70,7 +70,9 @@ router.get('/api/bus/route', async (req: Request, res: Response) => {
             routes = globalCSARouter.findReverseRoute(
                 coords.latA, coords.lonA,
                 coords.latB, coords.lonB,
-                timeResult.time
+                timeResult.time,
+                undefined,
+                minDepTime || undefined
             );
             if (minDepTime && (!routes || routes.length === 0 || routes[0].departure_time < minDepTime)) {
                 routes = globalCSARouter.findRoute(

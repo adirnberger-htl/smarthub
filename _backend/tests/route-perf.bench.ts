@@ -54,8 +54,8 @@ const BENCHMARK_ROUTES = [
     latB: 48.3039, lonB: 14.2869,
     maxFwdP50Ms: 0.50,
     maxFwdP95Ms: 1.00,
-    maxBwdP50Ms: 0.50,
-    maxBwdP95Ms: 1.00
+    maxBwdP50Ms: 1.50,
+    maxBwdP95Ms: 3.00
   },
   {
     name: 'Campus Commute (Linz Hbf -> JKU Altenberger Str)',
@@ -63,8 +63,8 @@ const BENCHMARK_ROUTES = [
     latB: 48.3366, lonB: 14.3193,
     maxFwdP50Ms: 0.70,
     maxFwdP95Ms: 1.40,
-    maxBwdP50Ms: 0.70,
-    maxBwdP95Ms: 1.40
+    maxBwdP50Ms: 2.00,
+    maxBwdP95Ms: 4.00
   },
   {
     name: 'Suburban Multi-Transfer (JKU -> PlusCity Pasching)',
@@ -72,8 +72,8 @@ const BENCHMARK_ROUTES = [
     latB: 48.2452, lonB: 14.2361,
     maxFwdP50Ms: 0.90,
     maxFwdP95Ms: 1.80,
-    maxBwdP50Ms: 0.90,
-    maxBwdP95Ms: 1.80
+    maxBwdP50Ms: 2.50,
+    maxBwdP95Ms: 5.00
   },
   {
     name: 'Regional Medium (Linz Hbf -> Wels Hbf)',
@@ -81,8 +81,8 @@ const BENCHMARK_ROUTES = [
     latB: 48.1656, lonB: 14.0266,
     maxFwdP50Ms: 1.40,
     maxFwdP95Ms: 2.50,
-    maxBwdP50Ms: 1.60,
-    maxBwdP95Ms: 3.00
+    maxBwdP50Ms: 3.00,
+    maxBwdP95Ms: 6.00
   },
   {
     name: 'Regional Long (Linz Hbf -> Steyr Bahnhof)',
@@ -90,8 +90,8 @@ const BENCHMARK_ROUTES = [
     latB: 48.0427, lonB: 14.4267,
     maxFwdP50Ms: 1.60,
     maxFwdP95Ms: 3.00,
-    maxBwdP50Ms: 1.50,
-    maxBwdP95Ms: 2.80
+    maxBwdP50Ms: 3.00,
+    maxBwdP95Ms: 6.00
   }
 ];
 

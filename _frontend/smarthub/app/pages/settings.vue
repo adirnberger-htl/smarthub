@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useRuntimeConfig } from '#app'
 import { useSettings } from '../composables/use-settings.js'
 import { useSmarthubApi } from '../composables/use-smarthub-api.js'
+import { useRoutineComparison } from '../composables/use-routine-comparison.js'
 import {
   useDeviceOsd,
   OSD_ACTION_METADATA,
@@ -20,7 +21,38 @@ definePageMeta({
 const router = useRouter()
 const route = useRoute()
 
-const { state, getGlobalSettings, addRoutineItem, updateRoutineItem, removeRoutineItem, setPreview, saveGlobalSettings } = useSettings()
+const activeSection = ref<'general' | 'hardware'>('general')
+
+watch(
+  () => route.query.section,
+  (val) => {
+    activeSection.value = val === 'hardware' ? 'hardware' : 'general'
+  },
+  { immediate: true }
+)
+
+function setSection(section: 'general' | 'hardware') {
+  if (section === 'general' && osdState.value.learningAction) {
+    cancelLearningKey()
+  }
+  activeSection.value = section
+  router.replace({
+    query: {
+      ...route.query,
+      section: section === 'hardware' ? 'hardware' : undefined,
+    },
+  })
+}
+
+function handleBack() {
+  if (activeSection.value === 'hardware') {
+    setSection('general')
+  } else {
+    router.push('/dashboard')
+  }
+}
+
+const { state, getGlobalSettings, addRoutineItem, updateRoutineItem, removeRoutineItem, saveGlobalSettings } = useSettings()
 const { geocodePlace, get, fetchMe, logout } = useSmarthubApi()
 const {
   state: osdState,
@@ -68,7 +100,53 @@ const currentDisplaySpeedLabel = computed(() => {
 
 const routines = computed(() => state.value.routines)
 
-function addNewRoutine() { addRoutineItem() }
+const { getComparison: getRoutineComparison } = useRoutineComparison({
+  routines,
+  onRoutineUpdated: (updatedRoutine) => {
+    updateRoutineItem(updatedRoutine)
+  }
+})
+
+const expandedRoutineId = ref<string | null>(null)
+
+watch(
+  () => routines.value,
+  (list) => {
+    if (list && list.length > 0 && !expandedRoutineId.value) {
+      expandedRoutineId.value = list[0].id
+    }
+  },
+  { immediate: true }
+)
+
+function toggleRoutineExpanded(id: string) {
+  expandedRoutineId.value = expandedRoutineId.value === id ? null : id
+}
+
+async function addNewRoutine() {
+  const created = await addRoutineItem()
+  if (created?.id) {
+    expandedRoutineId.value = created.id
+  }
+}
+
+async function handleDeleteRoutine(id: string) {
+  await removeRoutineItem(id)
+  if (expandedRoutineId.value === id) {
+    expandedRoutineId.value = routines.value[0]?.id || null
+  }
+}
+
+function formatActiveDays(days?: number[]): string {
+  if (!days || days.length === 0) return 'No days'
+  if (days.length === 7) return 'Every day'
+  const sorted = [...days].sort((a, b) => a - b)
+  const isWeekdays = sorted.length === 5 && [1, 2, 3, 4, 5].every(d => sorted.includes(d))
+  if (isWeekdays) return 'Mo - Fr'
+  const isWeekend = sorted.length === 2 && [0, 6].every(d => sorted.includes(d))
+  if (isWeekend) return 'Weekend'
+  return sorted.map(d => daysOfWeek[d]).join(', ')
+}
 
 function addAlarm(item: any) {
   if (!item.alarms) item.alarms = []
@@ -228,66 +306,6 @@ async function autoConfigure(item: any) {
   }
 }
 
-async function previewRoute(item: any) {
-  if (!item.destination) { alert('Please set a destination first.'); return; }
-  if (!item.startAddress) { alert('Please set a start address first.'); return; }
-
-  try {
-    let destCoords = item.destCoords?.address === item.destination ? item.destCoords : undefined
-    if (!destCoords) {
-      const place = await geocodePlace(item.destination)
-      destCoords = {
-        address: item.destination,
-        lat: place.coordinates.lat,
-        lon: place.coordinates.lon,
-        formattedAddress: place.formattedAddress
-      }
-      item.destCoords = destCoords
-    }
-
-    let startCoords = item.startCoords?.address === item.startAddress ? item.startCoords : undefined
-    if (!startCoords) {
-      const home = await geocodePlace(item.startAddress)
-      startCoords = {
-        address: item.startAddress,
-        lat: home.coordinates.lat,
-        lon: home.coordinates.lon,
-        formattedAddress: home.formattedAddress
-      }
-      item.startCoords = startCoords
-    }
-
-    const arrival = item.arrivalTime.includes(':') && item.arrivalTime.split(':').length >= 2 ? (item.arrivalTime.length === 5 ? item.arrivalTime + ':00' : item.arrivalTime) : item.arrivalTime + ':00'
-
-    if (item.transportMode === 'bus') {
-      const routes = await get<any[]>('/api/bus/route', {
-        lat_a: startCoords.lat,
-        lon_a: startCoords.lon,
-        lat_b: destCoords.lat,
-        lon_b: destCoords.lon,
-        arrival_time: arrival,
-        max_transfers: 2,
-      })
-      if (!routes || routes.length === 0) throw new Error('No bus routes found for this arrival time.')
-      setPreview({ routes })
-      showToast('Bus route preview loaded. Check dashboard.')
-    } else {
-      const carRoute = await get<any>('/api/car/route', {
-        lat_a: startCoords.lat,
-        lon_a: startCoords.lon,
-        lat_b: destCoords.lat,
-        lon_b: destCoords.lon,
-        arrival_time: arrival,
-      })
-      if (!carRoute || !carRoute.departureTime) throw new Error('Could not calculate driving route.')
-      setPreview({ carRoute })
-      showToast('Car route preview loaded. Check dashboard.')
-    }
-  } catch (e) {
-    alert(e instanceof Error ? e.message : String(e))
-  }
-}
-
 function toggleDevOverlay(e: Event) {
   const target = e.target as HTMLInputElement
   globalSettings.value.devOverlayEnabled = target.checked
@@ -295,11 +313,32 @@ function toggleDevOverlay(e: Event) {
   showToast(target.checked ? 'Dev status overlay enabled' : 'Dev status overlay disabled')
 }
 
+function onKeydown(e: KeyboardEvent) {
+  if (e.key !== 'Escape') return
+
+  // If user is actively learning a key, let the OSD composable handle canceling learning
+  if (osdState.value.learningAction) return
+
+  const target = e.target as HTMLElement | null
+  if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+    target.blur()
+    return
+  }
+
+  e.preventDefault()
+  handleBack()
+}
+
 onMounted(async () => {
+  window.addEventListener('keydown', onKeydown)
   await refreshGoogleStatus()
   if (route.query.google === 'connected') {
     statusMessage.value = 'Google account connected'
   }
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKeydown)
 })
 </script>
 
@@ -313,14 +352,14 @@ onMounted(async () => {
     </transition>
     <div class="settings-left">
       <div class="settings-page-header">
-        <button class="back-btn-premium" @click="router.push('/dashboard')">
+        <button class="back-btn-premium" @click="handleBack">
           <i class="fa-solid fa-arrow-left"></i>
-          Back to Dashboard
+          {{ activeSection === 'hardware' ? 'Back to Settings' : 'Back to Dashboard' }}
         </button>
-        <h2>Settings</h2>
+        <h2>{{ activeSection === 'hardware' ? 'Hardware Keypad & Knob' : 'Settings' }}</h2>
       </div>
 
-      <section class="routines-section">
+      <section v-if="activeSection === 'general'" class="routines-section">
         <div class="routines-section-header">
           <h3><i class="fa-solid fa-display" style="color: var(--color-primary); margin-right: 8px;"></i>Dashboard View</h3>
         </div>
@@ -447,155 +486,297 @@ onMounted(async () => {
         </div>
       </section>
 
-      <section class="routines-section">
+      <section v-if="activeSection === 'general'" class="routines-section">
         <div class="routines-section-header">
           <h3><i class="fa-solid fa-clock" style="color: var(--color-primary); margin-right: 8px;"></i>Your Routines</h3>
           <button class="add-routine-btn-premium" @click="addNewRoutine">+ New Routine</button>
         </div>
 
-        <div v-for="item in routines" :key="item.id" class="routine-card">
-          <div class="routine-card__header">
-            <div class="transport-segment">
-              <button 
-                type="button" 
-                class="segment-btn" 
-                :class="{ active: item.transportMode === 'bus' }"
-                @click="item.transportMode = 'bus'; updateRoutineItem(item)"
-              ><i class="fa-solid fa-bus" style="margin-right: 4px;"></i>Public Transport</button>
-              <button 
-                type="button" 
-                class="segment-btn" 
-                :class="{ active: item.transportMode === 'car' }"
-                @click="item.transportMode = 'car'; updateRoutineItem(item)"
-              ><i class="fa-solid fa-car" style="margin-right: 4px;"></i>Car</button>
-            </div>
-            <button class="delete-routine-btn" @click.prevent="removeRoutineItem(item.id)" aria-label="Delete routine">Delete</button>
-          </div>
+        <div v-if="!routines || routines.length === 0" class="routines-empty-state">
+          <p>No routines created yet. Click "+ New Routine" to configure your morning or evening commute.</p>
+        </div>
 
-          <div class="routine-card__body">
-            <div class="routine-card__section">
-              <label class="field-label">Active on days</label>
-              <div class="days-pill-container">
-                <button 
-                  v-for="(dayStr, idx) in daysOfWeek" 
-                  :key="idx" 
-                  class="day-pill" 
-                  :class="{ 'day-pill--active': item.activeDays?.includes(idx) }"
-                  @click="toggleDay(item, idx)"
-                >
-                  {{ dayStr }}
-                </button>
-              </div>
-            </div>
+        <div class="routines-accordion" v-else>
+          <div 
+            v-for="(item, idx) in routines" 
+            :key="item.id" 
+            class="routine-card routine-card--accordion"
+            :class="{ 'routine-card--expanded': expandedRoutineId === item.id }"
+          >
+            <!-- Accordion Header -->
+            <div 
+              class="routine-card__header routine-card__header--accordion" 
+              role="button"
+              :aria-expanded="expandedRoutineId === item.id"
+              tabindex="0"
+              @click="toggleRoutineExpanded(item.id)"
+              @keydown.enter.space.prevent="toggleRoutineExpanded(item.id)"
+            >
+              <div class="accordion-header__main">
+                <div class="accordion-header__title-group">
+                  <svg 
+                    class="accordion-chevron" 
+                    viewBox="0 0 24 24" 
+                    fill="none" 
+                    stroke="currentColor" 
+                    stroke-width="2.5" 
+                    stroke-linecap="round" 
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                  >
+                    <polyline points="9 18 15 12 9 6"></polyline>
+                  </svg>
+                  <span class="routine-title">{{ item.name || ('Routine ' + (idx + 1)) }}</span>
+                </div>
 
-            <div class="routine-card__section">
-              <label class="field-label">Target Arrival Time</label>
-              <p class="helper-text">The router will find a connection that gets you to the destination by this time.</p>
-              <div class="routine-card__row" style="align-items: center; gap: 12px; margin-top: 4px; display: flex; width: 100%;">
-                <TimePicker 
-                  :model-value="item.arrivalTime"
-                  @update:model-value="(val) => { 
-                    item.arrivalTime = val;
-                    if (item.startTime > val) item.startTime = val;
-                    if (item.endTime < val) item.endTime = val;
-                    updateRoutineItem(item);
-                  }"
-                />
-                <button class="auto-configure-btn" @click="autoConfigure(item)">
-                  <i class="fa-solid fa-wand-magic-sparkles" style="margin-right: 6px;"></i>Auto-Configure
-                </button>
-                <button class="preview-route-btn" @click="previewRoute(item)">
-                  <i class="fa-solid fa-eye" style="margin-right: 6px;"></i>Preview
-                </button>
-              </div>
-            </div>
+                <div class="accordion-header__meta">
+                  <span class="routine-badge routine-badge--mode" :class="'routine-badge--' + (item.transportMode || 'bus')">
+                    <i v-if="item.transportMode === 'car'" class="fa-solid fa-car"></i>
+                    <i v-else class="fa-solid fa-bus"></i>
+                    <span>{{ item.transportMode === 'car' ? 'Car' : 'Transit' }}</span>
+                  </span>
 
-            <div class="routine-card__section" style="margin-top: 8px;">
-              <label class="field-label">Dashboard Visibility Window</label>
-              <p class="helper-text">When should this routine be displayed on your dashboard?</p>
-              <div class="routine-card__row" style="align-items: center; gap: 12px; margin-top: 4px;">
-                <TimePicker 
-                  :model-value="item.startTime"
-                  :max-time="item.arrivalTime"
-                  @update:model-value="(val) => { 
-                    item.startTime = val;
-                    updateRoutineItem(item);
-                  }"
-                />
-                <span style="color: var(--text-muted); font-weight: 500;">to</span>
-                <TimePicker 
-                  :model-value="item.endTime"
-                  :min-time="item.arrivalTime"
-                  @update:model-value="(val) => { 
-                    item.endTime = val;
-                    updateRoutineItem(item);
-                  }"
-                />
-              </div>
-            </div>
+                  <span class="routine-badge routine-badge--days" v-if="item.activeDays && item.activeDays.length > 0">
+                    <i class="fa-regular fa-calendar-days"></i>
+                    <span>{{ formatActiveDays(item.activeDays) }}</span>
+                  </span>
 
-            <div class="routine-card__section">
-              <div class="routine-card__field">
-                <label class="field-label">Start Address</label>
-                <AddressAutocomplete 
-                  :model-value="item.startAddress" 
-                  @update:model-value="(val) => {
-                    if (item.startAddress !== val) {
-                      item.startAddress = val;
-                      item.startCoords = undefined;
-                      updateRoutineItem(item);
-                    }
-                  }"
-                  placeholder="e.g. Central Station" 
-                />
-              </div>
-              <div class="routine-card__field">
-                <label class="field-label">Destination Address</label>
-                <AddressAutocomplete 
-                  :model-value="item.destination" 
-                  @update:model-value="(val) => {
-                    if (item.destination !== val) {
-                      item.destination = val;
-                      item.destCoords = undefined;
-                      updateRoutineItem(item);
-                    }
-                  }"
-                  placeholder="e.g. City Center" 
-                />
-              </div>
-            </div>
+                  <span class="routine-badge routine-badge--arrival" v-if="item.arrivalTime">
+                    <i class="fa-regular fa-clock"></i>
+                    <span>{{ item.arrivalTime }}</span>
+                  </span>
 
-            <div class="routine-card__section">
-              <div class="alarms-header">
-                <label class="field-label">Linked Alarms</label>
-                <button class="add-alarm-btn" @click="addAlarm(item); updateRoutineItem(item)">+ Add Alarm</button>
-              </div>
-              <div class="alarms-list" v-if="item.alarms && item.alarms.length > 0">
-                <div v-for="alarm in item.alarms" :key="alarm.id" class="alarm-pill">
-                  <TimePicker 
-                    :model-value="alarm.time"
-                    @update:model-value="(val) => { alarm.time = val; updateRoutineItem(item) }"
-                  />
-                  <label class="alarm-toggle">
-                    <input 
-                      type="checkbox" 
-                      :checked="alarm.enabled"
-                      @change="(e) => { alarm.enabled = (e.target as HTMLInputElement).checked; updateRoutineItem(item) }"
-                    />
-                    <span class="slider"></span>
-                  </label>
-                  <button class="remove-alarm-btn" @click="removeAlarm(item, alarm.id); updateRoutineItem(item)"><i class="fa-solid fa-xmark"></i></button>
+                  <!-- Commute Comparison Indicator -->
+                  <div 
+                    v-if="getRoutineComparison(item.id)?.state && getRoutineComparison(item.id).state !== 'idle'" 
+                    class="commute-comparison-indicator"
+                    :class="'commute-comparison-indicator--' + getRoutineComparison(item.id).state"
+                    role="status"
+                    aria-live="polite"
+                    @click.stop
+                  >
+                    <span v-if="getRoutineComparison(item.id).state === 'loading'" class="comparison-spinner">
+                      <i class="fa-solid fa-circle-notch fa-spin"></i>
+                    </span>
+                    <span v-else-if="getRoutineComparison(item.id).state === 'car_faster'" class="comparison-icon">
+                      <i class="fa-solid fa-car"></i>
+                    </span>
+                    <span v-else-if="getRoutineComparison(item.id).state === 'transit_faster'" class="comparison-icon">
+                      <i class="fa-solid fa-bus"></i>
+                    </span>
+                    <span v-else-if="getRoutineComparison(item.id).state === 'similar'" class="comparison-icon">
+                      <i class="fa-solid fa-scale-balanced"></i>
+                    </span>
+                    <span v-else class="comparison-icon">
+                      <i class="fa-solid fa-circle-info"></i>
+                    </span>
+
+                    <span class="comparison-text">
+                      {{ getRoutineComparison(item.id).displayText }}
+                    </span>
+                  </div>
                 </div>
               </div>
-              <div v-else class="alarms-empty">No alarms set</div>
+
+              <div class="accordion-header__actions" @click.stop>
+                <button 
+                  class="delete-routine-btn" 
+                  @click.stop="handleDeleteRoutine(item.id)" 
+                  aria-label="Delete routine"
+                  type="button"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+
+            <!-- Accordion Body -->
+            <div v-show="expandedRoutineId === item.id" class="routine-card__body">
+              <div class="routine-card__section">
+                <div class="routine-card__field">
+                  <label class="field-label">Routine Name</label>
+                  <input 
+                    type="text" 
+                    class="routine-name-input" 
+                    :value="item.name || ''"
+                    placeholder="e.g. Work Commute"
+                    @change="(e) => { item.name = (e.target as HTMLInputElement).value; updateRoutineItem(item); }"
+                  />
+                </div>
+              </div>
+
+              <div class="routine-card__section">
+                <label class="field-label">Commute Transport Mode</label>
+                <div class="transport-segment">
+                  <button 
+                    type="button" 
+                    class="segment-btn" 
+                    :class="{ active: item.transportMode === 'bus' }"
+                    @click="item.transportMode = 'bus'; updateRoutineItem(item)"
+                  ><i class="fa-solid fa-bus" style="margin-right: 4px;"></i>Public Transport</button>
+                  <button 
+                    type="button" 
+                    class="segment-btn" 
+                    :class="{ active: item.transportMode === 'car' }"
+                    @click="item.transportMode = 'car'; updateRoutineItem(item)"
+                  ><i class="fa-solid fa-car" style="margin-right: 4px;"></i>Car</button>
+                </div>
+              </div>
+
+              <div class="routine-card__section">
+                <label class="field-label">Active on days</label>
+                <div class="days-pill-container">
+                  <button 
+                    v-for="(dayStr, idx) in daysOfWeek" 
+                    :key="idx" 
+                    class="day-pill" 
+                    :class="{ 'day-pill--active': item.activeDays?.includes(idx) }"
+                    @click="toggleDay(item, idx)"
+                  >
+                    {{ dayStr }}
+                  </button>
+                </div>
+              </div>
+
+              <div class="routine-card__section">
+                <label class="field-label">Target Arrival Time</label>
+                <p class="helper-text">The router will find a connection that gets you to the destination by this time.</p>
+                <div class="routine-card__row" style="align-items: center; gap: 12px; margin-top: 4px; display: flex; width: 100%;">
+                  <TimePicker 
+                    :model-value="item.arrivalTime"
+                    @update:model-value="(val) => { 
+                      item.arrivalTime = val;
+                      if (item.startTime > val) item.startTime = val;
+                      if (item.endTime < val) item.endTime = val;
+                      updateRoutineItem(item);
+                    }"
+                  />
+                  <button class="auto-configure-btn" @click="autoConfigure(item)">
+                    <i class="fa-solid fa-wand-magic-sparkles" style="margin-right: 6px;"></i>Auto-Configure
+                  </button>
+                </div>
+              </div>
+
+              <div class="routine-card__section" style="margin-top: 8px;">
+                <label class="field-label">Dashboard Visibility Window</label>
+                <p class="helper-text">When should this routine be displayed on your dashboard?</p>
+                <div class="routine-card__row" style="align-items: center; gap: 12px; margin-top: 4px;">
+                  <TimePicker 
+                    :model-value="item.startTime"
+                    :max-time="item.arrivalTime"
+                    @update:model-value="(val) => { 
+                      item.startTime = val;
+                      updateRoutineItem(item);
+                    }"
+                  />
+                  <span style="color: var(--text-muted); font-weight: 500;">to</span>
+                  <TimePicker 
+                    :model-value="item.endTime"
+                    :min-time="item.arrivalTime"
+                    @update:model-value="(val) => { 
+                      item.endTime = val;
+                      updateRoutineItem(item);
+                    }"
+                  />
+                </div>
+              </div>
+
+              <div class="routine-card__section">
+                <div class="routine-card__field">
+                  <label class="field-label">Start Address</label>
+                  <AddressAutocomplete 
+                    :model-value="item.startAddress" 
+                    @update:model-value="(val) => {
+                      if (item.startAddress !== val) {
+                        item.startAddress = val;
+                        item.startCoords = undefined;
+                        updateRoutineItem(item);
+                      }
+                    }"
+                    placeholder="e.g. Central Station" 
+                  />
+                </div>
+                <div class="routine-card__field">
+                  <label class="field-label">Destination Address</label>
+                  <AddressAutocomplete 
+                    :model-value="item.destination" 
+                    @update:model-value="(val) => {
+                      if (item.destination !== val) {
+                        item.destination = val;
+                        item.destCoords = undefined;
+                        updateRoutineItem(item);
+                      }
+                    }"
+                    placeholder="e.g. City Center" 
+                  />
+                </div>
+              </div>
+
+              <div class="routine-card__section">
+                <div class="alarms-header">
+                  <label class="field-label">Linked Alarms</label>
+                  <button class="add-alarm-btn" @click="addAlarm(item); updateRoutineItem(item)">+ Add Alarm</button>
+                </div>
+                <div class="alarms-list" v-if="item.alarms && item.alarms.length > 0">
+                  <div v-for="alarm in item.alarms" :key="alarm.id" class="alarm-pill">
+                    <TimePicker 
+                      :model-value="alarm.time"
+                      @update:model-value="(val) => { alarm.time = val; updateRoutineItem(item) }"
+                    />
+                    <label class="alarm-toggle">
+                      <input 
+                        type="checkbox" 
+                        :checked="alarm.enabled"
+                        @change="(e) => { alarm.enabled = (e.target as HTMLInputElement).checked; updateRoutineItem(item) }"
+                      />
+                      <span class="slider"></span>
+                    </label>
+                    <button class="remove-alarm-btn" @click="removeAlarm(item, alarm.id); updateRoutineItem(item)"><i class="fa-solid fa-xmark"></i></button>
+                  </div>
+                </div>
+                <div v-else class="alarms-empty">No alarms set</div>
+              </div>
             </div>
           </div>
         </div>
       </section>
 
+      <!-- Hardware & Input Entry Card (General View) -->
+      <section v-if="activeSection === 'general'" class="routines-section">
+        <div class="routines-section-header">
+          <h3><i class="fa-solid fa-gamepad" style="color: var(--color-primary); margin-right: 8px;"></i>Hardware &amp; Input</h3>
+        </div>
 
+        <div 
+          class="routine-card routine-card--nav" 
+          role="button" 
+          tabindex="0"
+          aria-label="Open Hardware Keypad and Knob Settings"
+          @click="setSection('hardware')"
+          @keydown.enter.space.prevent="setSection('hardware')"
+        >
+          <div class="routine-card__body routine-card__body--nav">
+            <div style="display: flex; align-items: center; gap: 14px;">
+              <div class="nav-icon-badge">
+                <i class="fa-solid fa-keyboard"></i>
+              </div>
+              <div>
+                <div class="nav-card-title">Hardware Keypad &amp; Knob Settings</div>
+                <p class="helper-text" style="margin: 2px 0 0 0;">Configure 6-button USB keypad mappings and rotary knob slot order</p>
+              </div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px; color: var(--text-muted);">
+              <span class="nav-card-action">Configure</span>
+              <svg class="accordion-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width: 14px; height: 14px;" aria-hidden="true">
+                <polyline points="9 18 15 12 9 6"></polyline>
+              </svg>
+            </div>
+          </div>
+        </div>
+      </section>
 
-      <section class="routines-section">
+      <!-- Hardware Keypad & Knob Mapping (Dedicated View) -->
+      <section v-if="activeSection === 'hardware'" class="routines-section">
         <div class="routines-section-header">
           <h3><i class="fa-solid fa-keyboard" style="color: var(--color-primary); margin-right: 8px;"></i>Hardware Keypad &amp; Knob Mapping</h3>
           <button type="button" class="add-routine-btn-premium" @click="resetKeymapToDefaults">
@@ -732,7 +913,7 @@ onMounted(async () => {
         </div>
       </section>
 
-      <section class="routines-section">
+      <section v-if="activeSection === 'general'" class="routines-section">
         <div class="routines-section-header">
           <h3><i class="fa-solid fa-calendar-day" style="color: var(--color-primary); margin-right: 8px;"></i>Integrations & Account</h3>
         </div>
@@ -770,7 +951,7 @@ onMounted(async () => {
         </div>
       </section>
 
-      <section class="routines-section">
+      <section v-if="activeSection === 'general'" class="routines-section">
         <div class="routines-section-header">
           <h3><i class="fa-solid fa-code" style="color: var(--color-primary); margin-right: 8px;"></i>Developer &amp; Diagnostics</h3>
         </div>
@@ -873,27 +1054,6 @@ onMounted(async () => {
   cursor: not-allowed;
 }
 
-.preview-route-btn {
-  background: var(--bg-surface-hover);
-  color: var(--text-primary);
-  border: 1px solid var(--border-base);
-  border-radius: 12px;
-  padding: 8px 14px;
-  font-size: 0.85rem;
-  font-weight: 600;
-  cursor: pointer;
-  box-shadow: 0 2px 6px var(--shadow-sm);
-  transition: transform 0.2s, background-color 0.2s;
-  white-space: nowrap;
-}
-.preview-route-btn:hover {
-  transform: translateY(-1px);
-  background: var(--bg-input);
-}
-.preview-route-btn:active {
-  transform: scale(0.95);
-}
-
 .settings-page {
   display: flex;
   justify-content: center;
@@ -945,7 +1105,7 @@ onMounted(async () => {
 
 .premium-select:hover {
   border-color: var(--border-strong);
-  background-color: var(--border-light);
+  background-color: var(--bg-surface-hover);
 }
 
 .premium-select:focus {
@@ -1084,7 +1244,7 @@ button:disabled {
 }
 
 .add-routine-btn-premium:hover {
-  background: var(--text-primary-alt-2);
+  background: var(--border-stronger);
   transform: translateY(-1px);
 }
 
@@ -1096,19 +1256,317 @@ button:disabled {
   transition: all 0.2s ease;
 }
 
+.routines-accordion {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+}
+
+.routines-empty-state {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-muted);
+  background: var(--bg-surface);
+  border-radius: 12px;
+  border: 1px dashed var(--border-base);
+}
+
+.routine-card--nav {
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.routine-card--nav:hover {
+  border-color: var(--color-primary);
+  background: var(--bg-surface-hover);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px var(--shadow-widget);
+}
+
+.routine-card--nav:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.routine-card__body--nav {
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.nav-icon-badge {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--bg-primary-light);
+  color: var(--color-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.25rem;
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+
+.routine-card--nav:hover .nav-icon-badge {
+  transform: scale(1.05);
+}
+
+.nav-card-title {
+  font-weight: 600;
+  font-size: 1rem;
+  color: var(--text-primary-strong);
+}
+
+.nav-card-action {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--color-primary);
+}
+
+.routine-card--accordion {
+  overflow: hidden;
+}
+
+.routine-card__header--accordion {
+  cursor: pointer;
+  user-select: none;
+  align-items: center;
+  background: transparent;
+  transition: background-color 0.2s ease;
+  border-bottom: none;
+  border-radius: 15px;
+}
+
+.routine-card__header--accordion:hover {
+  background: var(--bg-surface-hover);
+}
+
+.routine-card--expanded .routine-card__header--accordion {
+  border-bottom: 1px solid var(--border-light);
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  background: var(--bg-surface-hover);
+}
+
+.routine-card--expanded .routine-card__header--accordion:hover {
+  background: var(--border-base);
+}
+
+.accordion-header__main {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.accordion-header__title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.accordion-chevron {
+  width: 14px;
+  height: 14px;
+  color: var(--text-muted);
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  flex-shrink: 0;
+  display: block;
+}
+
+.routine-card--expanded .accordion-chevron,
+.accordion-chevron--expanded {
+  transform: rotate(90deg);
+}
+
+.routine-title {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.accordion-header__meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-left: 24px;
+}
+
+.routine-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-base);
+}
+
+.routine-badge--bus {
+  color: #059669;
+  border-color: rgba(16, 185, 129, 0.25);
+  background: rgba(16, 185, 129, 0.08);
+}
+
+.routine-badge--car {
+  color: #2563eb;
+  border-color: rgba(59, 130, 246, 0.25);
+  background: rgba(59, 130, 246, 0.08);
+}
+
+[data-theme="dark"] .routine-badge--bus {
+  color: #34d399;
+  border-color: rgba(16, 185, 129, 0.35);
+  background: rgba(16, 185, 129, 0.15);
+}
+
+[data-theme="dark"] .routine-badge--car {
+  color: #60a5fa;
+  border-color: rgba(59, 130, 246, 0.35);
+  background: rgba(59, 130, 246, 0.15);
+}
+
+.routine-name-input {
+  width: 100%;
+  max-width: 360px;
+  padding: 8px 12px;
+  font-size: 0.95rem;
+  border-radius: 8px;
+  border: 1px solid var(--border-base);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  transition: border-color 0.15s ease;
+}
+
+.routine-name-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
 .routine-card:hover {
   box-shadow: 0 8px 24px var(--shadow-widget);
+  border-color: var(--border-strong);
+}
+
+[data-theme="dark"] .routine-card:hover {
+  border-color: var(--border-strong);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 
 .routine-card__header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   padding: 16px 20px;
   background: var(--bg-surface-hover);
   border-bottom: 1px solid var(--border-light);
   border-top-left-radius: 15px;
   border-top-right-radius: 15px;
+}
+
+.routine-card__transport-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.commute-comparison-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  padding: 3px 10px;
+  border-radius: 9999px;
+  transition: all 0.2s ease;
+  line-height: 1.3;
+}
+
+.commute-comparison-indicator--loading {
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  border: 1px solid var(--border-base);
+}
+
+.commute-comparison-indicator--car_faster {
+  background: rgba(59, 130, 246, 0.1);
+  color: #2563eb;
+  border: 1px solid rgba(59, 130, 246, 0.25);
+}
+
+.commute-comparison-indicator--transit_faster {
+  background: rgba(23, 175, 122, 0.12);
+  color: #059669;
+  border: 1px solid rgba(23, 175, 122, 0.25);
+}
+
+.commute-comparison-indicator--similar {
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-base);
+}
+
+.commute-comparison-indicator--partial,
+.commute-comparison-indicator--error {
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  border: 1px dashed var(--border-base);
+}
+
+[data-theme="dark"] .commute-comparison-indicator--loading {
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  border-color: var(--border-base);
+}
+
+[data-theme="dark"] .commute-comparison-indicator--car_faster {
+  background: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+[data-theme="dark"] .commute-comparison-indicator--transit_faster {
+  background: rgba(23, 175, 122, 0.2);
+  color: #34d399;
+  border-color: rgba(23, 175, 122, 0.4);
+}
+
+[data-theme="dark"] .commute-comparison-indicator--similar {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border-color: var(--border-base);
+}
+
+[data-theme="dark"] .commute-comparison-indicator--partial,
+[data-theme="dark"] .commute-comparison-indicator--error {
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  border-color: var(--border-base);
+}
+
+.comparison-spinner {
+  display: inline-flex;
+  font-size: 0.75rem;
+  color: var(--color-primary);
+}
+
+.comparison-icon {
+  display: inline-flex;
+  font-size: 0.8rem;
+}
+
+.comparison-text {
+  letter-spacing: -0.01em;
 }
 
 .transport-segment {
@@ -1211,6 +1669,11 @@ button:disabled {
   font-weight: 600;
   transition: all 0.2s ease;
   cursor: pointer;
+}
+
+.day-pill:hover:not(.day-pill--active) {
+  background: var(--border-base);
+  color: var(--text-primary);
 }
 
 .day-pill--active {

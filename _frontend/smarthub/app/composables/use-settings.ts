@@ -93,7 +93,6 @@ export function useSettings() {
     routines: []
   }))
   
-  const preview = useState<any | null>('app-preview', () => null)
   const currentHM = useState<string>('app-time', () => {
     const d = new Date()
     return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
@@ -248,25 +247,14 @@ export function useSettings() {
     }
   }
 
-  function setPreview(p: any) {
-    preview.value = p
-  }
-
-  function clearPreview() {
-    preview.value = null
-  }
-
   return {
     state,
-    preview,
     currentHM,
     resolvedTheme,
     getGlobalSettings,
     addRoutineItem,
     updateRoutineItem,
     removeRoutineItem,
-    setPreview,
-    clearPreview,
     saveGlobalSettings,
     loadFromServer,
   }

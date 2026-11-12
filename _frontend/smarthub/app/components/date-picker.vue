@@ -93,6 +93,6 @@ function onClick(dateStr?: string | null) {
 .dp-weekday { font-size:12px; color:var(--text-muted); text-align:center }
 .dp-cell { height:36px; border-radius:6px; display:flex; align-items:center; justify-content:center; cursor:pointer }
 .dp-empty { background: transparent }
-.dp-cell:hover { background: var(--border-light) }
+.dp-cell:hover { background: var(--bg-surface-hover) }
 .dp-selected { background: var(--color-primary); color: #ffffff; font-weight:700 }
 </style>
